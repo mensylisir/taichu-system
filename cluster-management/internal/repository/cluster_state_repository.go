@@ -27,17 +27,25 @@ func (r *ClusterStateRepository) GetByClusterID(clusterID string) (*model.Cluste
 }
 
 func (r *ClusterStateRepository) Upsert(state *model.ClusterState) error {
-	return r.db.Clauses(gorm.OnConflict{
-		Columns:   []gorm.Column{{Name: "cluster_id"}},
-		DoUpdates: gorm.AssignmentExpression{
-			ColumnNames: []string{"status", "node_count", "total_cpu_cores", "total_memory_bytes",
-				"kubernetes_version", "api_server_url", "last_heartbeat_at", "last_sync_at",
-				"sync_error", "sync_success", "updated_at"},
-			Values: []interface{}{state.Status, state.NodeCount, state.TotalCPUCores,
-				state.TotalMemoryBytes, state.KubernetesVersion, state.APIServerURL,
-				state.LastHeartbeatAt, state.LastSyncAt, state.SyncError, state.SyncSuccess, state.UpdatedAt},
-		},
-	}).Create(state).Error
+	result := r.db.Where("cluster_id = ?", state.ClusterID).First(&model.ClusterState{})
+	if result.Error == nil {
+		return r.db.Model(&model.ClusterState{}).
+			Where("cluster_id = ?", state.ClusterID).
+			Updates(map[string]interface{}{
+				"status":              state.Status,
+				"node_count":          state.NodeCount,
+				"total_cpu_cores":     state.TotalCPUCores,
+				"total_memory_bytes":  state.TotalMemoryBytes,
+				"kubernetes_version":  state.KubernetesVersion,
+				"api_server_url":      state.APIServerURL,
+				"last_heartbeat_at":   state.LastHeartbeatAt,
+				"last_sync_at":        state.LastSyncAt,
+				"sync_error":          state.SyncError,
+				"sync_success":        state.SyncSuccess,
+				"updated_at":          state.UpdatedAt,
+			}).Error
+	}
+	return r.db.Create(state).Error
 }
 
 func (r *ClusterStateRepository) Update(state *model.ClusterState) error {

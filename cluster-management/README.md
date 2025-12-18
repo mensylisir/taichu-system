@@ -1,15 +1,26 @@
 # 生产级多集群管理系统
 
-一个基于Go语言开发的生产级多集群管理系统，支持Kubernetes集群的导入、管理和健康监控。
+一个基于Go语言开发的企业级集群管理系统，支持Kubernetes集群的全生命周期管理。
 
 ## 功能特性
 
+### 核心功能
 - 🔐 **安全加密存储**: 使用AES-256-GCM加密kubeconfig，确保敏感信息安全
 - 🔄 **异步健康检查**: 后台Worker定时检查集群状态，毫秒级响应列表查询
-- 📊 **实时状态监控**: 监控节点数、CPU/内存资源水位、Kubernetes版本
+- 📊 **实时状态监控**: 监控节点数、CPU/内存/存储资源水位、Kubernetes版本
 - 🎯 **高性能架构**: 连接池管理、LRU缓存、并发控制
-- 🗄️ **生产级数据库**: PostgreSQL双表设计（配置+状态），软删除、索引优化
+- 🗄️ **生产级数据库**: PostgreSQL多表设计，软删除、索引优化
 - 📡 **RESTful API**: 标准API设计，支持分页、筛选、搜索
+
+### 20+ API接口
+- **集群管理**: 创建、导入、列表、详情、拓扑 (5个接口)
+- **节点监控**: 节点列表、节点详情 (2个接口)
+- **事件管理**: 事件列表 (1个接口)
+- **策略管理**: 安全策略、自动伸缩策略 (2个接口)
+- **备份系统**: 创建、列表、详情、恢复、删除备份，备份计划 (6个接口)
+- **审计日志**: 审计事件查询 (1个接口)
+- **集群扩展**: 资源扩展、扩展历史 (2个接口)
+- **导入管理**: 导入集群、导入记录、导入状态 (3个接口)
 
 ## 技术栈
 
@@ -117,128 +128,211 @@ go run cmd/server/main.go
 
 ## API 文档
 
-### 1. 导入集群 (POST /api/v1/clusters)
+### 快速测试
 
-导入新的Kubernetes集群：
-
-```bash
-curl -X POST http://localhost:8080/api/v1/clusters \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "prod-shanghai-01",
-    "description": "上海生产环境核心集群",
-    "kubeconfig": "base64_encoded_kubeconfig",
-    "labels": {
-      "env": "prod",
-      "region": "shanghai"
-    }
-  }'
-```
-
-响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "c-7382abcd",
-    "name": "prod-shanghai-01",
-    "description": "上海生产环境核心集群",
-    "status": "unknown",
-    "created_at": "2024-01-01T10:00:00Z"
-  }
-}
-```
-
-### 2. 获取集群列表 (GET /api/v1/clusters)
-
-查询集群列表（支持分页和筛选）：
+使用提供的测试脚本：
 
 ```bash
-curl "http://localhost:8080/api/v1/clusters?page=1&limit=20&status=healthy&search=prod"
+# 启动服务器
+./test/scripts/test-cluster-api.sh start
+
+# 创建集群
+./test/scripts/test-cluster-api.sh create-cluster
+
+# 查看集群列表
+./test/scripts/test-cluster-api.sh list-clusters
+
+# 获取集群详情
+./test/scripts/test-cluster-api.sh get-cluster <CLUSTER_ID>
+
+# 查看集群拓扑
+./test/scripts/test-cluster-api.sh get-topology
+
+# 测试所有接口
+./test/scripts/test-cluster-api.sh test-all
+
+# 停止服务器
+./test/scripts/test-cluster-api.sh stop
 ```
 
-响应：
+### 主要API接口
 
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "total": 50,
-    "page": 1,
-    "limit": 20,
-    "clusters": [
-      {
-        "id": "c-7382abcd",
-        "name": "prod-shanghai-01",
-        "description": "上海生产环境核心集群",
-        "status": "healthy",
-        "node_count": 12,
-        "version": "1.0.0",
-        "labels": {
-          "env": "prod",
-          "region": "shanghai"
-        },
-        "created_at": "2024-01-01T10:00:00Z",
-        "updated_at": "2024-01-01T12:00:00Z"
-      }
-    ]
-  }
-}
-```
+#### 集群管理
 
-### 3. 获取集群详情 (GET /api/v1/clusters/{id})
-
-获取集群详细信息：
-
+**创建集群**
 ```bash
-curl http://localhost:8080/api/v1/clusters/c-7382abcd
+POST /api/v1/clusters
 ```
 
-响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "c-7382abcd",
-    "name": "prod-shanghai-01",
-    "description": "上海生产环境核心集群",
-    "status": "healthy",
-    "version": "1.0.0",
-    "labels": {
-      "env": "prod",
-      "region": "shanghai"
-    },
-    "node_count": 12,
-    "total_cpu_cores": 64,
-    "total_memory_bytes": 256000000000,
-    "kubernetes_version": "v1.28.3",
-    "api_server_url": "https://10.0.0.1:6443",
-    "last_heartbeat_at": "2024-01-01T12:00:00Z",
-    "created_at": "2024-01-01T10:00:00Z",
-    "updated_at": "2024-01-01T12:00:00Z"
-  }
-}
+**导入集群**
+```bash
+POST /api/v1/clusters/import
 ```
+
+**获取集群列表**
+```bash
+GET /api/v1/clusters?page=1&limit=10&status=active&search=prod
+```
+
+**获取集群详情**
+```bash
+GET /api/v1/clusters/{id}
+```
+
+**获取集群拓扑**
+```bash
+GET /api/v1/clusters/topology
+```
+
+#### 节点监控
+
+**获取节点列表**
+```bash
+GET /api/v1/clusters/{clusterId}/nodes
+```
+
+**获取节点详情**
+```bash
+GET /api/v1/clusters/{clusterId}/nodes/{nodeName}
+```
+
+#### 事件管理
+
+**获取事件列表**
+```bash
+GET /api/v1/clusters/{clusterId}/events?type=Warning
+```
+
+#### 策略管理
+
+**获取安全策略**
+```bash
+GET /api/v1/clusters/{clusterId}/security-policies
+```
+
+**获取自动伸缩策略**
+```bash
+GET /api/v1/clusters/{clusterId}/autoscaling-policies
+```
+
+#### 备份系统
+
+**创建备份**
+```bash
+POST /api/v1/clusters/{clusterId}/backups
+```
+
+**获取备份列表**
+```bash
+GET /api/v1/clusters/{clusterId}/backups
+```
+
+**获取备份详情**
+```bash
+GET /api/v1/clusters/{clusterId}/backups/{backupId}
+```
+
+**恢复备份**
+```bash
+POST /api/v1/clusters/{clusterId}/backups/{backupId}/restore
+```
+
+**删除备份**
+```bash
+DELETE /api/v1/clusters/{clusterId}/backups/{backupId}
+```
+
+**获取备份计划**
+```bash
+GET /api/v1/clusters/{clusterId}/backup-schedules
+```
+
+#### 审计日志
+
+**获取审计事件**
+```bash
+GET /api/v1/clusters/{clusterId}/audit?event_type=create
+```
+
+#### 集群扩展
+
+**请求扩展**
+```bash
+POST /api/v1/clusters/{clusterId}/expansion
+```
+
+**获取扩展历史**
+```bash
+GET /api/v1/clusters/{clusterId}/expansion/history
+```
+
+#### 导入管理
+
+**获取导入记录列表**
+```bash
+GET /api/v1/clusters/imports
+```
+
+**获取导入状态**
+```bash
+GET /api/v1/imports/{importId}/status
+```
+
+### 完整API文档
+
+详细的API文档请参考：[API文档](docs/API.md)
 
 ## 核心设计
 
 ### 数据库设计
 
-#### clusters 表（集群配置）
+#### 核心表
+
+**clusters** - 集群配置
 - 存储集群元数据和加密的kubeconfig
 - 支持软删除（`deleted_at`字段）
 - JSONB标签字段支持灵活过滤
 - UUID主键，支持分布式
 
-#### cluster_states 表（状态缓存）
-- 存储实时状态信息（节点数、资源统计、心跳时间）
+**cluster_states** - 状态缓存
+- 存储实时状态信息（节点数、资源统计、存储容量、心跳时间）
 - 每个集群只有一个最新状态记录
 - 由后台Worker异步更新
+
+**nodes** - 节点信息
+- 存储集群中所有节点的详细信息
+- 包括CPU、内存、Pod数量等
+
+**events** - 事件记录
+- 存储集群中的关键事件
+- 支持按类型、时间、命名空间筛选
+
+**security_policies** - 安全策略
+- 存储Pod安全策略、网络策略、RBAC策略
+
+**autoscaling_policies** - 自动伸缩策略
+- 存储HPA/VPA配置信息
+
+**cluster_backups** - 备份记录
+- 存储所有备份的元数据
+- 包括备份类型、状态、创建时间等
+
+**backup_schedules** - 备份计划
+- 存储自动备份计划配置
+
+**audit_events** - 审计日志
+- 记录所有关键操作的审计信息
+- 包括操作人、IP地址、操作结果等
+
+**cluster_expansions** - 扩展记录
+- 记录集群资源扩展历史
+- 包括扩展前后资源对比
+
+**import_records** - 导入记录
+- 记录集群导入过程的详细信息
+
+**cluster_resources** - 资源快照
+- 存储集群资源的定期快照
 
 ### 核心架构
 

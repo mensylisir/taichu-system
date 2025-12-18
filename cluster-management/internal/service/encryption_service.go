@@ -45,7 +45,10 @@ func (es *EncryptionService) Encrypt(plaintext string) (string, string, error) {
 		return "", "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	// Prepend nonce to ciphertext
+	ciphertext := make([]byte, 0, len(nonce)+len(plaintext)+gcm.Overhead())
+	ciphertext = append(ciphertext, nonce...)
+	ciphertext = gcm.Seal(ciphertext, nonce, []byte(plaintext), nil)
 
 	encodedCiphertext := base64.StdEncoding.EncodeToString(ciphertext)
 	encodedNonce := base64.StdEncoding.EncodeToString(nonce)
@@ -71,6 +74,16 @@ func (es *EncryptionService) Decrypt(ciphertext, nonce string) (string, error) {
 		return "", fmt.Errorf("failed to decode nonce: %w", err)
 	}
 
+	// The ciphertext already contains the nonce at the beginning
+	// We need to extract it for verification
+	nonceFromCiphertext := ciphertextBytes[:len(nonceBytes)]
+	actualCiphertext := ciphertextBytes[len(nonceBytes):]
+
+	// Verify nonce matches
+	if string(nonceFromCiphertext) != string(nonceBytes) {
+		return "", fmt.Errorf("nonce mismatch")
+	}
+
 	block, err := aes.NewCipher(es.key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cipher: %w", err)
@@ -81,7 +94,7 @@ func (es *EncryptionService) Decrypt(ciphertext, nonce string) (string, error) {
 		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	plaintext, err := gcm.Open(nil, nonceBytes, ciphertextBytes, nil)
+	plaintext, err := gcm.Open(nil, nonceBytes, actualCiphertext, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt: %w", err)
 	}

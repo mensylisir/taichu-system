@@ -29,11 +29,14 @@ type DatabaseConfig struct {
 	Password     string        `mapstructure:"password"`
 	DBName       string        `mapstructure:"dbname"`
 	SSLMode      string        `mapstructure:"sslmode"`
+	Charset      string        `mapstructure:"charset"`
+	Options      string        `mapstructure:"options"`
 	Timezone     string        `mapstructure:"timezone"`
 	MaxIdleConns int           `mapstructure:"max_idle_conns"`
 	MaxOpenConns int           `mapstructure:"max_open_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
 	AutoMigrate  bool          `mapstructure:"auto_migrate"`
+	AutoCreateDB bool          `mapstructure:"auto_create_db"`
 }
 
 type EncryptionConfig struct {

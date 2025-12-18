@@ -55,23 +55,7 @@ func (r *ClusterRepository) Delete(id string) error {
 	if err != nil {
 		return err
 	}
-	return r.db.Delete(cluster).Error
-}
-
-func (r *ClusterRepository) SoftDelete(id string) error {
-	cluster, err := r.GetByID(id)
-	if err != nil {
-		return err
-	}
-	return cluster.SoftDelete(r.db)
-}
-
-func (r *ClusterRepository) Restore(id string) error {
-	cluster, err := r.GetByID(id)
-	if err != nil {
-		return err
-	}
-	return cluster.Restore(r.db)
+	return r.db.Unscoped().Delete(cluster).Error
 }
 
 func (r *ClusterRepository) List(params ListClustersParams) ([]*model.Cluster, int64, error) {
@@ -96,7 +80,6 @@ func (r *ClusterRepository) List(params ListClustersParams) ([]*model.Cluster, i
 	}
 
 	err = query.Offset(params.Offset).Limit(params.Limit).
-		Preload("State").
 		Order("created_at DESC").
 		Find(&clusters).Error
 
@@ -105,7 +88,7 @@ func (r *ClusterRepository) List(params ListClustersParams) ([]*model.Cluster, i
 
 func (r *ClusterRepository) FindActiveClusters() ([]*model.Cluster, error) {
 	var clusters []*model.Cluster
-	err := r.db.Where("deleted_at IS NULL").Find(&clusters).Error
+	err := r.db.Find(&clusters).Error
 	return clusters, err
 }
 
@@ -126,13 +109,38 @@ func (r *ClusterRepository) ExistsByName(name string) (bool, error) {
 
 func (r *ClusterRepository) GetWithState(id string) (*model.ClusterWithState, error) {
 	var cluster model.Cluster
-	err := r.db.Preload("State").Where("id = ?", id).First(&cluster).Error
+	err := r.db.Where("id = ?", id).First(&cluster).Error
 	if err != nil {
+		return nil, err
+	}
+
+	// 单独获取 ClusterState
+	var state model.ClusterState
+	err = r.db.Where("cluster_id = ?", cluster.ID).First(&state).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err
 	}
 
 	return &model.ClusterWithState{
 		Cluster: &cluster,
-		State:   cluster.State,
+		State:   &state,
 	}, nil
+}
+
+func (r *ClusterRepository) FindAllWithState() ([]*model.ClusterWithState, error) {
+	var clusters []*model.Cluster
+	err := r.db.Find(&clusters).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*model.ClusterWithState, 0, len(clusters))
+	for _, cluster := range clusters {
+		result = append(result, &model.ClusterWithState{
+			Cluster: cluster,
+			State:   cluster.State,
+		})
+	}
+
+	return result, nil
 }

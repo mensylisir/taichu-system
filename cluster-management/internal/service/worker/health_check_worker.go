@@ -91,13 +91,14 @@ func (w *HealthCheckWorker) performHealthCheck() {
 
 	for _, cluster := range clusters {
 		w.wg.Add(1)
-		go w.checkCluster(*cluster)
+		go func(c model.Cluster) {
+			defer w.wg.Done()
+			w.checkCluster(c)
+		}(*cluster)
 	}
 }
 
 func (w *HealthCheckWorker) checkCluster(cluster model.Cluster) {
-	defer w.wg.Done()
-
 	w.sem <- struct{}{}
 	defer func() { <-w.sem }()
 

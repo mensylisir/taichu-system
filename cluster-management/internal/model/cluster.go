@@ -3,7 +3,6 @@ package model
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,15 +44,20 @@ type Cluster struct {
 	Description         string    `json:"description" gorm:"type:text"`
 	KubeconfigEncrypted string    `json:"-" gorm:"column:kubeconfig_encrypted;not null"`
 	KubeconfigNonce     string    `json:"-" gorm:"column:kubeconfig_nonce;not null;size:32"`
-	Version             string    `json:"version" gorm:"size:50;default:'1.0.0'"`
+	Version             string    `json:"version" gorm:"size:50"`
+	Provider            string    `json:"provider" gorm:"size:100;default:'太初'"`
+	Region              string    `json:"region" gorm:"size:100"`
 	Labels              JSONMap   `json:"labels" gorm:"type:jsonb;default:'{}'"`
 	CreatedAt           time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt           time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 	DeletedAt           *time.Time `json:"deleted_at" gorm:"index"`
 	CreatedBy           string    `json:"created_by" gorm:"size:100;default:'system'"`
 	UpdatedBy           string    `json:"updated_by" gorm:"size:100;default:'system'"`
+	LastBackupAt        *time.Time `json:"last_backup_at"`
+	EnvironmentType     string    `json:"environment_type" gorm:"size:50;default:'production'"`
+	ImportSource        string    `json:"import_source" gorm:"size:100"`
 
-	State *ClusterState `json:"state,omitempty" gorm:"foreignKey:ClusterID"`
+	State *ClusterState `json:"state,omitempty" gorm:"-"`
 }
 
 func (Cluster) TableName() string {
@@ -61,20 +65,23 @@ func (Cluster) TableName() string {
 }
 
 type ClusterState struct {
-	ID               uuid.UUID `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	ClusterID        uuid.UUID `json:"cluster_id" gorm:"uniqueIndex;not null;index"`
-	Status           string    `json:"status" gorm:"size:20;default:'unknown'"`
-	NodeCount        int       `json:"node_count" gorm:"default:0"`
-	TotalCPUCores    int       `json:"total_cpu_cores" gorm:"default:0"`
-	TotalMemoryBytes int64     `json:"total_memory_bytes" gorm:"default:0"`
-	KubernetesVersion string   `json:"kubernetes_version" gorm:"size:50"`
-	APIServerURL     string    `json:"api_server_url" gorm:"size:255"`
-	LastHeartbeatAt  *time.Time `json:"last_heartbeat_at"`
-	LastSyncAt       time.Time `json:"last_sync_at" gorm:"autoUpdateTime"`
-	SyncError        string    `json:"sync_error" gorm:"type:text"`
-	SyncSuccess      bool      `json:"sync_success" gorm:"default:false"`
-	CreatedAt        time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt        time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	ID                  uuid.UUID `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
+	ClusterID           uuid.UUID `json:"cluster_id" gorm:"uniqueIndex;not null;index"`
+	Status              string    `json:"status" gorm:"size:20;default:'unknown'"`
+	NodeCount           int       `json:"node_count" gorm:"default:0"`
+	TotalCPUCores       int       `json:"total_cpu_cores" gorm:"default:0"`
+	TotalMemoryBytes    int64     `json:"total_memory_bytes" gorm:"default:0"`
+	TotalStorageBytes   int64     `json:"total_storage_bytes" gorm:"default:0"`
+	UsedStorageBytes    int64     `json:"used_storage_bytes" gorm:"default:0"`
+	StorageUsagePercent float64   `json:"storage_usage_percent" gorm:"default:0"`
+	KubernetesVersion   string    `json:"kubernetes_version" gorm:"size:50"`
+	APIServerURL        string    `json:"api_server_url" gorm:"size:255"`
+	LastHeartbeatAt     *time.Time `json:"last_heartbeat_at"`
+	LastSyncAt          time.Time `json:"last_sync_at" gorm:"autoUpdateTime"`
+	SyncError           string    `json:"sync_error" gorm:"type:text"`
+	SyncSuccess         bool      `json:"sync_success" gorm:"default:false"`
+	CreatedAt           time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt           time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (ClusterState) TableName() string {
@@ -127,11 +134,11 @@ func (j *JSONMap) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (j JSONMap) MarshalJSON() ([]byte, error) {
-	if j == nil {
+func (j *JSONMap) MarshalJSON() ([]byte, error) {
+	if j == nil || len(*j) == 0 {
 		return []byte("{}"), nil
 	}
-	return json.Marshal(j)
+	return json.Marshal(map[string]interface{}(*j))
 }
 
 func (j JSONMap) Get(key string) (interface{}, bool) {
@@ -148,14 +155,14 @@ func (j JSONMap) GetString(key string) (string, bool) {
 	return "", false
 }
 
-func (j JSONMap) Set(key string, value interface{}) {
+func (j *JSONMap) Set(key string, value interface{}) {
 	if j == nil {
 		*j = make(JSONMap)
 	}
 	(*j)[key] = value
 }
 
-func (j JSONMap) Delete(key string) {
+func (j *JSONMap) Delete(key string) {
 	if j == nil {
 		return
 	}

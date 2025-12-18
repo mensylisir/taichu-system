@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
@@ -19,15 +20,6 @@ type ClusterService struct {
 	stateRepo         *repository.ClusterStateRepository
 	encryptionService *EncryptionService
 	clusterManager    *ClusterManager
-}
-
-type ListClustersParams struct {
-	Page          int
-	Limit         int
-	Offset        int
-	Status        string
-	LabelSelector string
-	Search        string
 }
 
 func NewClusterService(
@@ -57,7 +49,6 @@ func (s *ClusterService) Create(cluster *model.Cluster) (*model.Cluster, error) 
 		return nil, ErrClusterExists
 	}
 
-	cluster.Version = "1.0.0"
 	cluster.CreatedBy = "api-user"
 	cluster.UpdatedBy = "api-user"
 
@@ -113,11 +104,7 @@ func (s *ClusterService) Update(cluster *model.Cluster) error {
 }
 
 func (s *ClusterService) Delete(id string) error {
-	return s.clusterRepo.SoftDelete(id)
-}
-
-func (s *ClusterService) Restore(id string) error {
-	return s.clusterRepo.Restore(id)
+	return s.clusterRepo.Delete(id)
 }
 
 func (s *ClusterService) TriggerSync(clusterID string) error {
@@ -163,3 +150,9 @@ func (s *ClusterService) TriggerSync(clusterID string) error {
 
 	return s.stateRepo.Upsert(state)
 }
+
+func (s *ClusterService) GetClusterState(clusterID string) (*model.ClusterState, error) {
+	return s.stateRepo.GetByClusterID(clusterID)
+}
+
+type ListClustersParams = repository.ListClustersParams

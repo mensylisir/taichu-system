@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -33,6 +32,9 @@ type HealthCheckResult struct {
 	NodeCount         int       `json:"node_count"`
 	TotalCPUCores     int       `json:"total_cpu_cores"`
 	TotalMemoryBytes  int64     `json:"total_memory_bytes"`
+	TotalStorageBytes int64     `json:"total_storage_bytes"`
+	UsedStorageBytes  int64     `json:"used_storage_bytes"`
+	StorageUsagePercent float64 `json:"storage_usage_percent"`
 	APIServerURL      string    `json:"api_server_url"`
 	LastHeartbeatAt   time.Time `json:"last_heartbeat_at"`
 	Error             string    `json:"error,omitempty"`
@@ -137,12 +139,18 @@ func (cm *ClusterManager) HealthCheck(ctx context.Context, clientset *kubernetes
 		totalMemory += node.Status.Allocatable.Memory().Value()
 	}
 
+	// 获取存储信息
+	totalStorage, usedStorage, storagePercent := cm.getStorageInfo(ctx, clientset)
+
 	return &HealthCheckResult{
 		Status:            "healthy",
 		Version:           version.String(),
 		NodeCount:         readyNodes,
 		TotalCPUCores:     int(totalCPU / 1000),
 		TotalMemoryBytes:  totalMemory,
+		TotalStorageBytes: totalStorage,
+		UsedStorageBytes:  usedStorage,
+		StorageUsagePercent: storagePercent,
 		LastHeartbeatAt:   time.Now(),
 	}, nil
 }
@@ -180,4 +188,37 @@ func (cm *ClusterManager) ValidateKubeconfig(kubeconfig string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (cm *ClusterManager) getStorageInfo(ctx context.Context, clientset *kubernetes.Clientset) (int64, int64, float64) {
+	// 获取所有命名空间的PVC
+	pvcs, err := clientset.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		// 如果无法获取PVC，返回默认值
+		return 0, 0, 0.0
+	}
+
+	var totalStorage int64
+	var usedStorage int64
+
+	for _, pvc := range pvcs.Items {
+		// 获取PVC的容量
+		storage := pvc.Status.Capacity["storage"]
+		if !storage.IsZero() {
+			totalStorage += storage.Value()
+		}
+
+		// 获取PVC的已分配量（AllocatedResources）
+		if alloc, ok := pvc.Status.AllocatedResources["storage"]; ok && !alloc.IsZero() {
+			usedStorage += alloc.Value()
+		}
+	}
+
+	// 计算存储使用百分比
+	var storagePercent float64
+	if totalStorage > 0 {
+		storagePercent = float64(usedStorage) / float64(totalStorage) * 100
+	}
+
+	return totalStorage, usedStorage, storagePercent
 }
