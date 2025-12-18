@@ -1,0 +1,25 @@
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /api/v1/vms               --> infra-management/internal/api.(*Handler).GetVMs-fm (3 handlers)
+[GIN-debug] GET    /api/v1/storages          --> infra-management/internal/api.(*Handler).GetStorages-fm (3 handlers)
+[GIN-debug] GET    /api/v1/firewall-rules    --> infra-management/internal/api.(*Handler).GetFirewallRules-fm (3 handlers)
+2025/12/18 17:07:20 Server starting on :8080
+[GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
+Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.
+[GIN-debug] Listening and serving HTTP on :8080
+[GIN] 2025/12/18 - 17:09:31 | 200 |      1.9533ms |             ::1 | GET      "/api/v1/storages"
+[GIN] 2025/12/18 - 17:11:18 | 200 |      1.1554ms |             ::1 | GET      "/api/v1/firewall-rules"
+[GIN] 2025/12/18 - 17:23:41 | 200 |       1.129ms |             ::1 | GET      "/api/v1/vms"
+[GIN] 2025/12/18 - 17:23:53 | 200 |       938.7µs |             ::1 | GET      "/api/v1/storages"
+[GIN] 2025/12/18 - 17:24:05 | 200 |       965.9µs |             ::1 | GET      "/api/v1/firewall-rules"
+[GIN] 2025/12/18 - 17:28:42 | 200 |     37.6358ms |             ::1 | GET      "/api/v1/vms"
+[GIN] 2025/12/18 - 17:28:57 | 200 |       653.1µs |             ::1 | GET      "/api/v1/vms"
+[GIN] 2025/12/18 - 17:28:57 | 200 |       631.7µs |             ::1 | GET      "/api/v1/storages"
+[GIN] 2025/12/18 - 17:28:57 | 200 |       978.7µs |             ::1 | GET      "/api/v1/firewall-rules"
+[GIN] 2025/12/18 - 17:30:35 | 200 |       965.1µs |             ::1 | GET      "/api/v1/vms"
+[GIN] 2025/12/18 - 17:30:35 | 200 |      3.2376ms |             ::1 | GET      "/api/v1/firewall-rules"
+[GIN] 2025/12/18 - 17:30:35 | 200 |     18.6662ms |             ::1 | GET      "/api/v1/storages"
