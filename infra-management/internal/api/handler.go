@@ -61,16 +61,24 @@ func (h *Handler) GetStorages(c *gin.Context) {
 	var storages []models.Storage
 	for rows.Next() {
 		var storage models.Storage
+<<<<<<< HEAD
 		var mountedTo sql.NullString
 		err := rows.Scan(&storage.ID, &storage.Name, &storage.Type, &storage.Capacity,
 			&storage.IOPS, &storage.Status, &mountedTo, &storage.CreatedAt)
+=======
+		err := rows.Scan(&storage.ID, &storage.Name, &storage.Type, &storage.Capacity,
+			&storage.IOPS, &storage.Status, &storage.MountedTo, &storage.CreatedAt)
+>>>>>>> 5aaadc3da987fed277afac8622f2b688dcc79074
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+<<<<<<< HEAD
 		if mountedTo.Valid {
 			storage.MountedTo = &mountedTo.String
 		}
+=======
+>>>>>>> 5aaadc3da987fed277afac8622f2b688dcc79074
 		storages = append(storages, storage)
 	}
 
@@ -111,4 +119,8 @@ func (h *Handler) GetFirewallRules(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 5aaadc3da987fed277afac8622f2b688dcc79074
