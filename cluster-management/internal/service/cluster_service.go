@@ -16,23 +16,26 @@ var (
 )
 
 type ClusterService struct {
-	clusterRepo       *repository.ClusterRepository
-	stateRepo         *repository.ClusterStateRepository
-	encryptionService *EncryptionService
-	clusterManager    *ClusterManager
+	clusterRepo         *repository.ClusterRepository
+	stateRepo           *repository.ClusterStateRepository
+	clusterResourceRepo *repository.ClusterResourceRepository
+	encryptionService   *EncryptionService
+	clusterManager      *ClusterManager
 }
 
 func NewClusterService(
 	clusterRepo *repository.ClusterRepository,
 	stateRepo *repository.ClusterStateRepository,
+	clusterResourceRepo *repository.ClusterResourceRepository,
 	encryptionService *EncryptionService,
 	clusterManager *ClusterManager,
 ) *ClusterService {
 	return &ClusterService{
-		clusterRepo:       clusterRepo,
-		stateRepo:         stateRepo,
-		encryptionService: encryptionService,
-		clusterManager:    clusterManager,
+		clusterRepo:         clusterRepo,
+		stateRepo:           stateRepo,
+		clusterResourceRepo: clusterResourceRepo,
+		encryptionService:   encryptionService,
+		clusterManager:      clusterManager,
 	}
 }
 
@@ -78,24 +81,42 @@ func (s *ClusterService) GetClusterWithState(id string) (*model.ClusterWithState
 		}
 		return nil, fmt.Errorf("failed to get cluster: %w", err)
 	}
+
+	// 从 cluster_state 表获取最新的状态数据
+	state, err := s.stateRepo.GetByClusterID(id)
+	if err == nil {
+		// 更新所有状态字段，包括 NodeCount
+		clusterWithState.State.Status = state.Status
+		clusterWithState.State.NodeCount = state.NodeCount
+		clusterWithState.State.KubernetesVersion = state.KubernetesVersion
+		clusterWithState.State.APIServerURL = state.APIServerURL
+		clusterWithState.State.LastHeartbeatAt = state.LastHeartbeatAt
+		clusterWithState.State.LastSyncAt = state.LastSyncAt
+		clusterWithState.State.SyncError = state.SyncError
+		clusterWithState.State.SyncSuccess = state.SyncSuccess
+	}
+
+	// 从 cluster_resources 表获取最新的资源数据
+	// 注意：cluster_state 表不再包含资源字段，资源数据存储在 cluster_resources 表中
+	// API 调用方需要从 cluster_resources 表获取资源数据
+	resource, _ := s.clusterResourceRepo.GetLatestByClusterID(id)
+	_ = resource // 确保变量被使用，避免未使用错误
+
 	return clusterWithState, nil
 }
 
+// GetClusterResource 获取集群的资源使用情况
+func (s *ClusterService) GetClusterResource(clusterID string) (*model.ClusterResource, error) {
+	return s.clusterResourceRepo.GetLatestByClusterID(clusterID)
+}
+
+// GetClusterResourceRepo 获取clusterResourceRepo实例
+func (s *ClusterService) GetClusterResourceRepo() *repository.ClusterResourceRepository {
+	return s.clusterResourceRepo
+}
+
 func (s *ClusterService) ListClusters(params ListClustersParams) ([]*model.ClusterWithState, int64, error) {
-	clusters, total, err := s.clusterRepo.List(params)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list clusters: %w", err)
-	}
-
-	result := make([]*model.ClusterWithState, 0, len(clusters))
-	for _, cluster := range clusters {
-		result = append(result, &model.ClusterWithState{
-			Cluster: cluster,
-			State:   cluster.State,
-		})
-	}
-
-	return result, total, nil
+	return s.clusterRepo.List(params)
 }
 
 func (s *ClusterService) Update(cluster *model.Cluster) error {
@@ -138,8 +159,6 @@ func (s *ClusterService) TriggerSync(clusterID string) error {
 		ClusterID:         cluster.ID,
 		Status:            result.Status,
 		NodeCount:         result.NodeCount,
-		TotalCPUCores:     result.TotalCPUCores,
-		TotalMemoryBytes:  result.TotalMemoryBytes,
 		KubernetesVersion: result.Version,
 		APIServerURL:      result.APIServerURL,
 		LastHeartbeatAt:   &result.LastHeartbeatAt,

@@ -12,6 +12,7 @@ import (
 
 type BackupHandler struct {
 	backupService *service.BackupService
+	auditService  *service.AuditService
 }
 
 type CreateBackupRequest struct {
@@ -64,9 +65,10 @@ type RestoreProgressResponse struct {
 	EstimatedTime int     `json:"estimated_time,omitempty"`
 }
 
-func NewBackupHandler(backupService *service.BackupService) *BackupHandler {
+func NewBackupHandler(backupService *service.BackupService, auditService *service.AuditService) *BackupHandler {
 	return &BackupHandler{
 		backupService: backupService,
+		auditService:  auditService,
 	}
 }
 
@@ -92,6 +94,22 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 	}
 
 	go h.backupService.ExecuteBackup(backup.ID.String())
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.LogBackupOperation(
+			id,
+			"create",
+			backup.ID.String(),
+			user,
+			map[string]interface{}{
+				"backup_name":   req.BackupName,
+				"backup_type":   req.BackupType,
+				"retention_days": req.RetentionDays,
+			},
+		)
+	}
 
 	utils.Success(c, http.StatusCreated, backup)
 }
@@ -215,6 +233,21 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.LogBackupOperation(
+			clusterUUID,
+			"restore",
+			backupUUID.String(),
+			user,
+			map[string]interface{}{
+				"restore_name": req.RestoreName,
+				"restore_id":   restoreID,
+			},
+		)
+	}
+
 	utils.Success(c, http.StatusOK, gin.H{
 		"message":    "Backup restoration started",
 		"restore_id": restoreID,
@@ -241,6 +274,20 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to delete backup: %v", err)
 		return
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.LogBackupOperation(
+			clusterUUID,
+			"delete",
+			backupUUID.String(),
+			user,
+			map[string]interface{}{
+				"backup_id": backupUUID.String(),
+			},
+		)
 	}
 
 	utils.Success(c, http.StatusOK, gin.H{

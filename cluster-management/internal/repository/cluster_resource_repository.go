@@ -2,7 +2,8 @@ package repository
 
 import (
 	"time"
-	
+
+	"github.com/google/uuid"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"gorm.io/gorm"
 )
@@ -63,9 +64,12 @@ func (r *ClusterResourceRepository) Upsert(resource *model.ClusterResource) erro
 		resource.ID = existingResource.ID
 		// 更新时间戳为当前时间
 		resource.Timestamp = time.Now()
-		return r.db.Model(&existingResource).Updates(resource).Error
+		return r.db.Model(&existingResource).Where("id = ?", existingResource.ID).Updates(resource).Error
 	}
 	
 	// 如果没有记录，创建新记录
+	if resource.ID == uuid.Nil {
+		resource.ID = uuid.New()
+	}
 	return r.db.Create(resource).Error
 }

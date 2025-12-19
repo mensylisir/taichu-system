@@ -108,7 +108,85 @@ func (h *AuditHandler) ListAuditEvents(c *gin.Context) {
 			Action:     event.Action,
 			Resource:   event.Resource,
 			ResourceID: event.ResourceID,
-			User:       event.User,
+			User:       event.Username,
+			IPAddress:  event.IPAddress,
+			OldValue:   convertJSONMap(event.OldValue),
+			NewValue:   convertJSONMap(event.NewValue),
+			Details:    convertJSONMap(event.Details),
+			Result:     event.Result,
+			Timestamp:  event.Timestamp.Format(time.RFC3339),
+		})
+	}
+
+	response := AuditListResponse{
+		Events: responses,
+		Total:  total,
+		Page:   page,
+		Limit:  limit,
+	}
+
+	utils.Success(c, http.StatusOK, response)
+}
+
+// ListAllAuditEvents 获取所有审计日志（全局）
+func (h *AuditHandler) ListAllAuditEvents(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	eventType := c.Query("event_type")
+	action := c.Query("action")
+	user := c.Query("user")
+	result := c.Query("result")
+	startTimeStr := c.Query("start_time")
+	endTimeStr := c.Query("end_time")
+
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	offset := (page - 1) * limit
+
+	params := repository.AuditListParams{
+		EventType: eventType,
+		Action:    action,
+		User:      user,
+		Result:    result,
+		Limit:     limit,
+		Offset:    offset,
+		SortBy:    "timestamp",
+		SortOrder: "desc",
+	}
+
+	if startTimeStr != "" {
+		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
+			params.StartTime = startTime
+		}
+	}
+
+	if endTimeStr != "" {
+		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
+			params.EndTime = endTime
+		}
+	}
+
+	// 使用 uuid.Nil 表示查询所有集群的审计日志
+	events, total, err := h.auditService.GetAuditLogs(uuid.Nil, params)
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "Failed to get audit events: %v", err)
+		return
+	}
+
+	responses := make([]*AuditEventResponse, 0, len(events))
+	for _, event := range events {
+		responses = append(responses, &AuditEventResponse{
+			ID:         event.ID,
+			EventType:  event.EventType,
+			Action:     event.Action,
+			Resource:   event.Resource,
+			ResourceID: event.ResourceID,
+			User:       event.Username,
 			IPAddress:  event.IPAddress,
 			OldValue:   convertJSONMap(event.OldValue),
 			NewValue:   convertJSONMap(event.NewValue),

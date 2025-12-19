@@ -108,6 +108,9 @@ func (r *NodeRepository) UpsertSingle(node *model.Node) error {
 	}
 
 	// 如果节点不存在，创建它
+	if node.ID == uuid.Nil {
+		node.ID = uuid.New()
+	}
 	return r.db.Create(node).Error
 }
 

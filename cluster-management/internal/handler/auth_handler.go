@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/taichu-system/cluster-management/internal/middleware"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/service"
@@ -11,12 +12,14 @@ import (
 )
 
 type AuthHandler struct {
-	authService *service.AuthService
+	authService  *service.AuthService
+	auditService *service.AuditService
 }
 
-func NewAuthHandler(authService *service.AuthService) *AuthHandler {
+func NewAuthHandler(authService *service.AuthService, auditService *service.AuditService) *AuthHandler {
 	return &AuthHandler{
-		authService: authService,
+		authService:  authService,
+		auditService: auditService,
 	}
 }
 
@@ -30,8 +33,47 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	authResp, err := h.authService.Login(req.Username, req.Password)
 	if err != nil {
+		// 记录登录失败的审计日志
+		if h.auditService != nil {
+			h.auditService.CreateAuditEvent(
+				uuid.Nil,
+				"auth",
+				"login",
+				"user",
+				req.Username,
+				req.Username,
+				c.ClientIP(),
+				c.GetHeader("User-Agent"),
+				nil,
+				nil,
+				map[string]interface{}{
+					"username": req.Username,
+				},
+				"failed",
+			)
+		}
 		utils.Error(c, http.StatusUnauthorized, "Login failed: %v", err)
 		return
+	}
+
+	// 记录登录成功的审计日志
+	if h.auditService != nil {
+		h.auditService.CreateAuditEvent(
+			uuid.Nil,
+			"auth",
+			"login",
+			"user",
+			req.Username,
+			req.Username,
+			c.ClientIP(),
+			c.GetHeader("User-Agent"),
+			nil,
+			nil,
+			map[string]interface{}{
+				"username": req.Username,
+			},
+			"success",
+		)
 	}
 
 	utils.Success(c, http.StatusOK, authResp)
@@ -103,6 +145,35 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 
 // Logout 用户登出
 func (h *AuthHandler) Logout(c *gin.Context) {
+	// 从 Authorization header 中获取用户信息
+	authHeader := c.GetHeader("Authorization")
+	var username string
+	if len(authHeader) >= 7 && authHeader[:7] == "Bearer " {
+		if user, err := h.authService.ValidateToken(authHeader[7:]); err == nil {
+			username = user.Username
+		}
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		h.auditService.CreateAuditEvent(
+			uuid.Nil,
+			"auth",
+			"logout",
+			"user",
+			username,
+			username,
+			c.ClientIP(),
+			c.GetHeader("User-Agent"),
+			nil,
+			nil,
+			map[string]interface{}{
+				"username": username,
+			},
+			"success",
+		)
+	}
+
 	// 在实际应用中，可以将令牌加入黑名单或使用Redis存储已登出的令牌
 	// 这里简化处理，只返回成功响应
 	utils.Success(c, http.StatusOK, gin.H{

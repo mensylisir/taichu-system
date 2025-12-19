@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 )
 
 type EncryptionService struct {
@@ -83,6 +84,10 @@ func (es *EncryptionService) Decrypt(ciphertext, nonce string) (string, error) {
 	if string(nonceFromCiphertext) != string(nonceBytes) {
 		return "", fmt.Errorf("nonce mismatch")
 	}
+
+	// Add debug logging
+	log.Printf("DEBUG: Decrypt attempt - ciphertext length: %d, nonce length: %d, ciphertext prefix: %s, nonce: %s",
+		len(ciphertextBytes), len(nonceBytes), base64.StdEncoding.EncodeToString(nonceFromCiphertext[:8]), base64.StdEncoding.EncodeToString(nonceBytes[:8]))
 
 	block, err := aes.NewCipher(es.key)
 	if err != nil {

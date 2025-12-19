@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 	"github.com/taichu-system/cluster-management/internal/service"
@@ -102,15 +103,22 @@ func (w *HealthCheckWorker) checkCluster(cluster model.Cluster) {
 	w.sem <- struct{}{}
 	defer func() { <-w.sem }()
 
+	log.Printf("[HEALTH-CHECK] Starting check for cluster %s (ID: %s)", cluster.Name, cluster.ID.String())
+	log.Printf("[HEALTH-CHECK] Kubeconfig encrypted length: %d, nonce length: %d",
+		len(cluster.KubeconfigEncrypted), len(cluster.KubeconfigNonce))
+
 	kubeconfig, err := w.encryptionSvc.Decrypt(
 		cluster.KubeconfigEncrypted,
 		cluster.KubeconfigNonce,
 	)
 	if err != nil {
-		log.Printf("Failed to decrypt kubeconfig for cluster %s: %v", cluster.Name, err)
+		log.Printf("[HEALTH-CHECK] Failed to decrypt kubeconfig for cluster %s (ID: %s): %v", cluster.Name, cluster.ID.String(), err)
 		w.updateClusterState(cluster.ID, false, err.Error())
 		return
 	}
+
+	log.Printf("[HEALTH-CHECK] Successfully decrypted kubeconfig for cluster %s (ID: %s), kubeconfig length: %d",
+		cluster.Name, cluster.ID.String(), len(kubeconfig))
 
 	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
 	defer cancel()
@@ -138,31 +146,58 @@ func (w *HealthCheckWorker) updateClusterState(
 	success bool,
 	result interface{},
 ) {
-	state := &model.ClusterState{
-		ClusterID: clusterID,
-		SyncSuccess: success,
-		LastSyncAt: time.Now(),
-	}
-
-	if !success {
-		state.Status = "disconnected"
-		if errMsg, ok := result.(string); ok {
-			state.SyncError = errMsg
+	// 使用数据库事务确保状态更新原子性
+	err := w.stateRepo.GetDB().Transaction(func(tx *gorm.DB) error {
+		if !success {
+			// 健康检查失败，更新失败状态并清除集群数据
+			log.Printf("Health check failed for cluster %s, setting status to disconnected", clusterID)
+			if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID).Updates(map[string]interface{}{
+				"status":               "disconnected",
+				"node_count":           0,
+				"total_cpu_cores":      0,
+				"total_memory_bytes":   0,
+				"kubernetes_version":   "",
+				"api_server_url":       "",
+				"last_heartbeat_at":    nil,
+				"last_sync_at":         time.Now(),
+				"sync_success":         false,
+				"updated_at":           time.Now(),
+			}).Error; err != nil {
+				return err
+			}
+			if errMsg, ok := result.(string); ok {
+				if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID).Updates(map[string]interface{}{
+					"sync_error":    errMsg,
+					"updated_at":    time.Now(),
+				}).Error; err != nil {
+					return err
+				}
+			}
+		} else if result != nil {
+			if healthResult, ok := result.(*service.HealthCheckResult); ok {
+				// 健康检查成功，更新健康检查相关字段
+				log.Printf("Health check succeeded for cluster %s, setting status to %s", clusterID, healthResult.Status)
+				if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID).Updates(map[string]interface{}{
+					"status":               healthResult.Status,
+					"node_count":           healthResult.NodeCount,
+					"kubernetes_version":   healthResult.Version,
+					"api_server_url":       healthResult.APIServerURL,
+					"last_heartbeat_at":    healthResult.LastHeartbeatAt,
+					"last_sync_at":         time.Now(),
+					"sync_success":         true,
+					"sync_error":           "",
+					"updated_at":           time.Now(),
+				}).Error; err != nil {
+					return err
+				}
+				log.Printf("Updated cluster state for %s: status=%s, version=%s", clusterID, healthResult.Status, healthResult.Version)
+			}
 		}
-	} else if result != nil {
-		if healthResult, ok := result.(*service.HealthCheckResult); ok {
-			state.Status = healthResult.Status
-			state.NodeCount = healthResult.NodeCount
-			state.TotalCPUCores = healthResult.TotalCPUCores
-			state.TotalMemoryBytes = healthResult.TotalMemoryBytes
-			state.KubernetesVersion = healthResult.Version
-			state.APIServerURL = healthResult.APIServerURL
-			state.LastHeartbeatAt = &healthResult.LastHeartbeatAt
-		}
-	}
+		return nil
+	})
 
-	if err := w.stateRepo.Upsert(state); err != nil {
-		log.Printf("Failed to update cluster state: %v", err)
+	if err != nil {
+		log.Printf("Failed to update cluster state for %s: %v", clusterID, err)
 	}
 }
 

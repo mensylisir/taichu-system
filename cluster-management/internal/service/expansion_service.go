@@ -10,20 +10,23 @@ import (
 )
 
 type ExpansionService struct {
-	expansionRepo *repository.ExpansionRepository
-	clusterRepo   *repository.ClusterRepository
-	stateRepo     *repository.ClusterStateRepository
+	expansionRepo     *repository.ExpansionRepository
+	clusterRepo       *repository.ClusterRepository
+	stateRepo         *repository.ClusterStateRepository
+	clusterResourceRepo *repository.ClusterResourceRepository
 }
 
 func NewExpansionService(
 	expansionRepo *repository.ExpansionRepository,
 	clusterRepo *repository.ClusterRepository,
 	stateRepo *repository.ClusterStateRepository,
+	clusterResourceRepo *repository.ClusterResourceRepository,
 ) *ExpansionService {
 	return &ExpansionService{
-		expansionRepo: expansionRepo,
-		clusterRepo:   clusterRepo,
-		stateRepo:     stateRepo,
+		expansionRepo:       expansionRepo,
+		clusterRepo:         clusterRepo,
+		stateRepo:           stateRepo,
+		clusterResourceRepo: clusterResourceRepo,
 	}
 }
 
@@ -38,15 +41,21 @@ func (s *ExpansionService) RequestExpansion(clusterID uuid.UUID, newNodeCount, n
 		return nil, fmt.Errorf("failed to get cluster state: %w", err)
 	}
 
+	// 从 cluster_resources 表获取当前资源使用情况
+	resource, err := s.clusterResourceRepo.GetLatestByClusterID(clusterID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cluster resource: %w", err)
+	}
+
 	expansion := &model.ClusterExpansion{
 		ClusterID:    clusterID,
 		OldNodeCount: state.NodeCount,
 		NewNodeCount: newNodeCount,
-		OldCPUCores:  state.TotalCPUCores,
+		OldCPUCores:  resource.TotalCPUCores,
 		NewCPUCores:  newCPUCores,
-		OldMemoryGB:  int(state.TotalMemoryBytes / 1024 / 1024 / 1024),
+		OldMemoryGB:  int(resource.TotalMemoryBytes / 1024 / 1024 / 1024),
 		NewMemoryGB:  newMemoryGB,
-		OldStorageGB: int(state.TotalStorageBytes / 1024 / 1024 / 1024),
+		OldStorageGB: int(resource.TotalStorageBytes / 1024 / 1024 / 1024),
 		NewStorageGB: newStorageGB,
 		Status:       "pending",
 		Reason:       reason,
@@ -83,13 +92,30 @@ func (s *ExpansionService) ExecuteExpansion(expansionID string) error {
 		return s.failExpansion(expansion, fmt.Errorf("failed to get cluster state: %w", err))
 	}
 
+	// 更新 cluster_state 表中的 node_count 字段
 	state.NodeCount = expansion.NewNodeCount
-	state.TotalCPUCores = expansion.NewCPUCores
-	state.TotalMemoryBytes = int64(expansion.NewMemoryGB) * 1024 * 1024 * 1024
-	state.TotalStorageBytes = int64(expansion.NewStorageGB) * 1024 * 1024 * 1024
+	state.UpdatedAt = time.Now()
 
-	if err := s.stateRepo.Update(state); err != nil {
+	if err := s.stateRepo.GetDB().Model(&model.ClusterState{}).Where("cluster_id = ?", expansion.ClusterID.String()).Updates(map[string]interface{}{
+		"node_count": state.NodeCount,
+		"updated_at": state.UpdatedAt,
+	}).Error; err != nil {
 		return s.failExpansion(expansion, fmt.Errorf("failed to update cluster state: %w", err))
+	}
+
+	// 更新 cluster_resources 表中的资源字段
+	resource, err := s.clusterResourceRepo.GetLatestByClusterID(expansion.ClusterID.String())
+	if err != nil {
+		return s.failExpansion(expansion, fmt.Errorf("failed to get cluster resource: %w", err))
+	}
+
+	resource.TotalCPUCores = expansion.NewCPUCores
+	resource.TotalMemoryBytes = int64(expansion.NewMemoryGB) * 1024 * 1024 * 1024
+	resource.TotalStorageBytes = int64(expansion.NewStorageGB) * 1024 * 1024 * 1024
+	resource.Timestamp = time.Now()
+
+	if err := s.clusterResourceRepo.Upsert(resource); err != nil {
+		return s.failExpansion(expansion, fmt.Errorf("failed to update cluster resource: %w", err))
 	}
 
 	expansion.Status = "completed"

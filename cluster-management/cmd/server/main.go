@@ -81,6 +81,7 @@ func main() {
 		nodeRepo,
 		eventRepo,
 		clusterResourceRepo,
+		stateRepo,
 		autoscalingPolicyRepo,
 		securityPolicyRepo,
 		clusterManager,
@@ -103,6 +104,7 @@ func main() {
 	clusterService := service.NewClusterService(
 		clusterRepo,
 		stateRepo,
+		clusterResourceRepo,
 		encryptionService,
 		clusterManager,
 	)
@@ -154,6 +156,7 @@ func main() {
 		clusterRepo,
 		encryptionService,
 		clusterManager,
+		clusterService,
 	)
 
 	auditRepo := repository.NewAuditRepository(db)
@@ -164,6 +167,7 @@ func main() {
 		expansionRepo,
 		clusterRepo,
 		stateRepo,
+		clusterResourceRepo,
 	)
 
 	// 创建新服务
@@ -178,25 +182,27 @@ func main() {
 	// 创建认证服务和处理器
 	userRepo := repository.NewUserRepository(db)
 	authService := service.NewAuthService(userRepo, "your-secret-key", 24*time.Hour)
-	authHandler := handler.NewAuthHandler(authService)
+	authHandler := handler.NewAuthHandler(authService, auditService)
 
 	clusterHandler := handler.NewClusterHandler(
 		clusterService,
 		encryptionService,
 		healthCheckWorker,
 		createClusterService,
+		nodeService,
+		auditService,
 	)
 
 	nodeHandler := handler.NewNodeHandler(nodeService)
 	eventHandler := handler.NewEventHandler(eventService)
 	securityPolicyHandler := handler.NewSecurityPolicyHandler(securityPolicyService)
 	autoscalingPolicyHandler := handler.NewAutoscalingPolicyHandler(autoscalingPolicyService)
-	backupHandler := handler.NewBackupHandler(backupService)
+	backupHandler := handler.NewBackupHandler(backupService, auditService)
 	topologyHandler := handler.NewTopologyHandler(topologyService)
-	importHandler := handler.NewImportHandler(importService, healthCheckWorker, resourceSyncWorker)
+	importHandler := handler.NewImportHandler(importService, healthCheckWorker, resourceSyncWorker, auditService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	expansionHandler := handler.NewExpansionHandler(expansionService)
-	machineHandler := handler.NewMachineHandler(machineService)
+	machineHandler := handler.NewMachineHandler(machineService, auditService)
 
 	r := setupRoutes(clusterHandler, nodeHandler, eventHandler, securityPolicyHandler, autoscalingPolicyHandler, backupHandler, topologyHandler, importHandler, auditHandler, expansionHandler, machineHandler, authHandler)
 
@@ -387,6 +393,9 @@ func setupRoutes(
 	v1 := r.Group("/api/v1")
 	// v1.Use(middleware.JWTMiddleware("your-secret-key"))
 	{
+		// 全局审计日志接口（查看所有操作）
+		v1.GET("/audit", auditHandler.ListAllAuditEvents)
+
 		// 集群拓扑接口（不需要cluster ID）
 		v1.GET("/clusters/topology", topologyHandler.GetTopology)
 

@@ -18,6 +18,7 @@ type ImportService struct {
 	clusterRepo    *repository.ClusterRepository
 	encryptionSvc  *EncryptionService
 	clusterManager *ClusterManager
+	clusterService *ClusterService
 }
 
 type ImportRecordWithDetails struct {
@@ -29,12 +30,14 @@ func NewImportService(
 	clusterRepo *repository.ClusterRepository,
 	encryptionSvc *EncryptionService,
 	clusterManager *ClusterManager,
+	clusterService *ClusterService,
 ) *ImportService {
 	return &ImportService{
 		importRepo:     importRepo,
 		clusterRepo:    clusterRepo,
 		encryptionSvc:  encryptionSvc,
 		clusterManager: clusterManager,
+		clusterService: clusterService,
 	}
 }
 
@@ -219,6 +222,12 @@ func (s *ImportService) performImport(importRecord *model.ImportRecord, cluster 
 	importRecord.ImportedResources["namespaces"] = s.countResources(clientset, "namespaces")
 	importRecord.ImportedResources["deployments"] = s.countResources(clientset, "deployments")
 	importRecord.ImportedResources["services"] = s.countResources(clientset, "services")
+
+	// 同步集群状态（包括版本、节点数等）
+	err = s.clusterService.TriggerSync(cluster.ID.String())
+	if err != nil {
+		return fmt.Errorf("failed to trigger sync: %w", err)
+	}
 
 	return nil
 }

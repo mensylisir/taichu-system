@@ -14,12 +14,14 @@ import (
 // MachineHandler 机器处理器
 type MachineHandler struct {
 	machineService *service.MachineService
+	auditService   *service.AuditService
 }
 
 // NewMachineHandler 创建机器处理器
-func NewMachineHandler(machineService *service.MachineService) *MachineHandler {
+func NewMachineHandler(machineService *service.MachineService, auditService *service.AuditService) *MachineHandler {
 	return &MachineHandler{
 		machineService: machineService,
+		auditService:   auditService,
 	}
 }
 
@@ -80,6 +82,33 @@ func (h *MachineHandler) CreateMachine(c *gin.Context) {
 	if err := h.machineService.CreateMachine(machine); err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to create machine: %v", err)
 		return
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.CreateAuditEvent(
+			uuid.Nil,
+			"machine",
+			"create",
+			"machine",
+			machine.ID.String(),
+			user,
+			c.ClientIP(),
+			c.GetHeader("User-Agent"),
+			nil,
+			map[string]interface{}{
+				"name":             machine.Name,
+				"ip_address":       machine.IPAddress,
+				"internal_address": machine.InternalAddress,
+				"user":             machine.User,
+				"role":             machine.Role,
+			},
+			map[string]interface{}{
+				"operation": "create_machine",
+			},
+			"success",
+		)
 	}
 
 	utils.Success(c, http.StatusCreated, machine)
@@ -161,6 +190,7 @@ func (h *MachineHandler) UpdateMachine(c *gin.Context) {
 	}
 
 	// 更新字段
+	oldMachine := *machine // 保存旧值用于审计日志
 	machine.Name = req.Name
 	machine.IPAddress = req.IPAddress
 	machine.InternalAddress = req.InternalAddress
@@ -179,6 +209,39 @@ func (h *MachineHandler) UpdateMachine(c *gin.Context) {
 		return
 	}
 
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.CreateAuditEvent(
+			uuid.Nil,
+			"machine",
+			"update",
+			"machine",
+			machine.ID.String(),
+			user,
+			c.ClientIP(),
+			c.GetHeader("User-Agent"),
+			map[string]interface{}{
+				"name":             oldMachine.Name,
+				"ip_address":       oldMachine.IPAddress,
+				"internal_address": oldMachine.InternalAddress,
+				"user":             oldMachine.User,
+				"role":             oldMachine.Role,
+			},
+			map[string]interface{}{
+				"name":             machine.Name,
+				"ip_address":       machine.IPAddress,
+				"internal_address": machine.InternalAddress,
+				"user":             machine.User,
+				"role":             machine.Role,
+			},
+			map[string]interface{}{
+				"operation": "update_machine",
+			},
+			"success",
+		)
+	}
+
 	utils.Success(c, http.StatusOK, machine)
 }
 
@@ -192,9 +255,43 @@ func (h *MachineHandler) DeleteMachine(c *gin.Context) {
 		return
 	}
 
+	// 获取机器信息用于审计日志
+	machine, err := h.machineService.GetMachine(id)
+	if err != nil {
+		utils.Error(c, http.StatusNotFound, "Machine not found")
+		return
+	}
+
 	if err := h.machineService.DeleteMachine(id); err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to delete machine: %v", err)
 		return
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.CreateAuditEvent(
+			uuid.Nil,
+			"machine",
+			"delete",
+			"machine",
+			id.String(),
+			user,
+			c.ClientIP(),
+			c.GetHeader("User-Agent"),
+			map[string]interface{}{
+				"name":             machine.Name,
+				"ip_address":       machine.IPAddress,
+				"internal_address": machine.InternalAddress,
+				"user":             machine.User,
+				"role":             machine.Role,
+			},
+			nil,
+			map[string]interface{}{
+				"operation": "delete_machine",
+			},
+			"success",
+		)
 	}
 
 	utils.Success(c, http.StatusOK, gin.H{"message": "Machine deleted successfully"})
@@ -219,9 +316,43 @@ func (h *MachineHandler) UpdateMachineStatus(c *gin.Context) {
 		return
 	}
 
+	// 获取机器信息用于审计日志
+	machine, err := h.machineService.GetMachine(id)
+	if err != nil {
+		utils.Error(c, http.StatusNotFound, "Machine not found")
+		return
+	}
+
+	oldStatus := machine.Status
+
 	if err := h.machineService.UpdateMachineStatus(id, req.Status); err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to update machine status: %v", err)
 		return
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.CreateAuditEvent(
+			uuid.Nil,
+			"machine",
+			"update_status",
+			"machine",
+			id.String(),
+			user,
+			c.ClientIP(),
+			c.GetHeader("User-Agent"),
+			map[string]interface{}{
+				"status": oldStatus,
+			},
+			map[string]interface{}{
+				"status": req.Status,
+			},
+			map[string]interface{}{
+				"operation": "update_machine_status",
+			},
+			"success",
+		)
 	}
 
 	utils.Success(c, http.StatusOK, gin.H{"message": "Machine status updated successfully"})

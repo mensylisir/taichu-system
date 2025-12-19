@@ -69,11 +69,6 @@ type ClusterState struct {
 	ClusterID           uuid.UUID `json:"cluster_id" gorm:"uniqueIndex;not null;index"`
 	Status              string    `json:"status" gorm:"size:20;default:'unknown'"`
 	NodeCount           int       `json:"node_count" gorm:"default:0"`
-	TotalCPUCores       int       `json:"total_cpu_cores" gorm:"default:0"`
-	TotalMemoryBytes    int64     `json:"total_memory_bytes" gorm:"default:0"`
-	TotalStorageBytes   int64     `json:"total_storage_bytes" gorm:"default:0"`
-	UsedStorageBytes    int64     `json:"used_storage_bytes" gorm:"default:0"`
-	StorageUsagePercent float64   `json:"storage_usage_percent" gorm:"default:0"`
 	KubernetesVersion   string    `json:"kubernetes_version" gorm:"size:50"`
 	APIServerURL        string    `json:"api_server_url" gorm:"size:255"`
 	LastHeartbeatAt     *time.Time `json:"last_heartbeat_at"`

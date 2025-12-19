@@ -22,6 +22,7 @@ type ResourceSyncWorker struct {
 	nodeRepo              *repository.NodeRepository
 	eventRepo             *repository.EventRepository
 	clusterResourceRepo   *repository.ClusterResourceRepository
+	clusterStateRepo      *repository.ClusterStateRepository
 	autoscalingPolicyRepo *repository.AutoscalingPolicyRepository
 	securityPolicyRepo    *repository.SecurityPolicyRepository
 	clusterManager        *service.ClusterManager
@@ -39,6 +40,7 @@ func NewResourceSyncWorker(
 	nodeRepo *repository.NodeRepository,
 	eventRepo *repository.EventRepository,
 	clusterResourceRepo *repository.ClusterResourceRepository,
+	clusterStateRepo *repository.ClusterStateRepository,
 	autoscalingPolicyRepo *repository.AutoscalingPolicyRepository,
 	securityPolicyRepo *repository.SecurityPolicyRepository,
 	clusterManager *service.ClusterManager,
@@ -51,6 +53,7 @@ func NewResourceSyncWorker(
 		nodeRepo:              nodeRepo,
 		eventRepo:             eventRepo,
 		clusterResourceRepo:   clusterResourceRepo,
+		clusterStateRepo:      clusterStateRepo,
 		autoscalingPolicyRepo: autoscalingPolicyRepo,
 		securityPolicyRepo:    securityPolicyRepo,
 		clusterManager:        clusterManager,
@@ -152,6 +155,9 @@ func (w *ResourceSyncWorker) syncClusterData(cluster model.Cluster) {
 
 	// 同步安全策略
 	w.syncSecurityPolicies(ctx, clientset, cluster.ID)
+
+	// 更新 cluster_state 中的 APIServerURL
+	w.updateAPIServerURL(ctx, clientset, cluster.ID)
 
 	log.Printf("Resource sync completed for cluster %s", cluster.Name)
 }
@@ -333,6 +339,7 @@ func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset
 
 	var usedCPUCores float64
 	var usedMemoryBytes int64
+	var usedStorageBytes int64
 
 	for _, pod := range pods.Items {
 		if pod.Status.Phase == corev1.PodRunning {
@@ -357,8 +364,11 @@ func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset
 		memoryUsagePercent = (float64(usedMemoryBytes) / float64(totalMemoryBytes)) * 100
 	}
 	if totalStorageBytes > 0 {
-		// 这里简化处理，实际应该获取已使用的存储信息
-		storageUsagePercent = 0.0
+		// 获取已使用的存储信息
+		usedStorageBytes = calculateUsedStorageBytes(clientset, ctx)
+		storageUsagePercent = (float64(usedStorageBytes) / float64(totalStorageBytes)) * 100
+	} else {
+		usedStorageBytes = 0
 	}
 
 	// 创建集群资源记录
@@ -372,13 +382,30 @@ func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset
 		UsedMemoryBytes:     usedMemoryBytes,
 		MemoryUsagePercent:  memoryUsagePercent,
 		TotalStorageBytes:   totalStorageBytes,
-		UsedStorageBytes:    0, // 简化处理
+		UsedStorageBytes:    usedStorageBytes,
 		StorageUsagePercent: storageUsagePercent,
 	}
 
 	// 使用Upsert方法创建或更新集群资源记录
 	if err := w.clusterResourceRepo.Upsert(clusterResource); err != nil {
 		log.Printf("Failed to upsert cluster resource: %v", err)
+	}
+
+	// 只更新 last_sync_at 字段，表示资源同步已完成
+	// 资源数据存储在 cluster_resources 表中，API会从该表获取最新数据
+	err = w.clusterStateRepo.GetDB().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID.String()).Updates(map[string]interface{}{
+			"last_sync_at": time.Now(),
+			"updated_at":   time.Now(),
+		}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("Failed to update sync timestamp for cluster %s: %v", clusterID, err)
+	} else {
+		log.Printf("Resource sync completed for cluster %s", clusterID)
 	}
 
 	log.Printf("Synced cluster resources for cluster %s", clusterID)
@@ -553,4 +580,74 @@ func (w *ResourceSyncWorker) syncSecurityPolicies(ctx context.Context, clientset
 	}
 
 	log.Printf("Synced security policies for cluster %s", clusterID)
+}
+
+// calculateUsedStorageBytes 计算集群中已使用的存储字节数
+func calculateUsedStorageBytes(clientset *kubernetes.Clientset, ctx context.Context) int64 {
+	var totalUsedStorageBytes int64
+
+	// 获取所有命名空间
+	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("Failed to list namespaces: %v", err)
+		return 0
+	}
+
+	// 遍历每个命名空间，统计PVC的使用情况
+	for _, ns := range namespaces.Items {
+		pvcs, err := clientset.CoreV1().PersistentVolumeClaims(ns.Name).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.Printf("Failed to list PVCs in namespace %s: %v", ns.Name, err)
+			continue
+		}
+
+		for _, pvc := range pvcs.Items {
+			// 如果PVC已绑定到PV，获取已使用空间
+			if pvc.Status.Phase == corev1.ClaimBound && pvc.Status.Capacity != nil {
+				if storage, ok := pvc.Status.Capacity[corev1.ResourceStorage]; ok {
+					totalUsedStorageBytes += storage.Value()
+				}
+			}
+		}
+	}
+
+	return totalUsedStorageBytes
+}
+
+// updateAPIServerURL 更新 cluster_state 中的 APIServerURL
+func (w *ResourceSyncWorker) updateAPIServerURL(ctx context.Context, clientset *kubernetes.Clientset, clusterID uuid.UUID) {
+	// 获取 APIServer URL（通过配置获取）
+	config, err := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "kube-apiserver-original", metav1.GetOptions{})
+	var apiServerURL string
+	if err == nil {
+		if url, ok := config.Data["api-server-url"]; ok {
+			apiServerURL = url
+		}
+	}
+
+	// 如果没有找到，尝试从节点信息推断
+	if apiServerURL == "" {
+		nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err == nil && len(nodes.Items) > 0 {
+			// 使用第一个节点的 IP 作为 APIServer URL
+			apiServerURL = "https://" + nodes.Items[0].Status.Addresses[0].Address + ":6443"
+		}
+	}
+
+	// 使用数据库事务更新 cluster_state 表中的 APIServerURL
+	// 确保API服务器URL更新是原子的，不与其他Worker的更新冲突
+	err = w.clusterStateRepo.GetDB().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID.String()).Updates(map[string]interface{}{
+			"api_server_url": apiServerURL,
+			"updated_at":     time.Now(),
+		}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("Failed to update APIServerURL for cluster %s: %v", clusterID, err)
+	} else {
+		log.Printf("Updated APIServerURL for cluster %s: %s", clusterID, apiServerURL)
+	}
 }

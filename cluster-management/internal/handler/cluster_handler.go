@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -18,6 +19,8 @@ type ClusterHandler struct {
 	encryptionService    *service.EncryptionService
 	worker               *worker.HealthCheckWorker
 	createClusterService *service.CreateClusterService
+	nodeService          *service.NodeService
+	auditService         *service.AuditService
 }
 
 type CreateClusterRequest struct {
@@ -95,12 +98,16 @@ func NewClusterHandler(
 	encryptionService *service.EncryptionService,
 	worker *worker.HealthCheckWorker,
 	createClusterService *service.CreateClusterService,
+	nodeService *service.NodeService,
+	auditService *service.AuditService,
 ) *ClusterHandler {
 	return &ClusterHandler{
 		clusterService:       clusterService,
 		encryptionService:    encryptionService,
 		worker:               worker,
 		createClusterService: createClusterService,
+		nodeService:          nodeService,
+		auditService:         auditService,
 	}
 }
 
@@ -171,6 +178,24 @@ func (h *ClusterHandler) CreateCluster(c *gin.Context) {
 
 	// 异步触发集群同步
 	go h.worker.TriggerSync(created.ID)
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.LogClusterOperation(
+			created.ID,
+			"create",
+			"cluster",
+			user,
+			nil,
+			map[string]interface{}{
+				"name":        created.Name,
+				"description": created.Description,
+				"provider":    created.Provider,
+				"region":      created.Region,
+			},
+		)
+	}
 
 	// 构建响应
 	response := CreateClusterResponse{
@@ -288,26 +313,44 @@ func (h *ClusterHandler) GetCluster(c *gin.Context) {
 		return
 	}
 
+	// 从 cluster_resources 表获取资源使用情况
+	var resource *model.ClusterResource
+	if clusterResource, err := h.clusterService.GetClusterResourceRepo().GetLatestByClusterID(id.String()); err == nil {
+		resource = clusterResource
+	}
+
+	// 获取节点列表
+	nodesWithDetails, _, _, err := h.nodeService.ListNodes(id.String(), "", "", 1, 1000)
+	if err != nil {
+		log.Printf("Failed to get nodes for cluster %s: %v", id.String(), err)
+		nodesWithDetails = nil
+	}
+
 	response := struct {
-		ID                  uuid.UUID `json:"id"`
-		Name                string    `json:"name"`
-		Description         string    `json:"description"`
-		Provider            string    `json:"provider"`
-		Region              string    `json:"region"`
-		Status              string    `json:"status"`
-		Version             string    `json:"version"`
+		ID                  uuid.UUID   `json:"id"`
+		Name                string      `json:"name"`
+		Description         string      `json:"description"`
+		Provider            string      `json:"provider"`
+		Region              string      `json:"region"`
+		Status              string      `json:"status"`
+		Version             string      `json:"version"`
 		Labels              map[string]string `json:"labels"`
-		NodeCount           int       `json:"node_count"`
-		TotalCPUCores       int       `json:"total_cpu_cores"`
-		TotalMemoryBytes    int64     `json:"total_memory_bytes"`
-		TotalStorageBytes   int64     `json:"total_storage_bytes"`
-		UsedStorageBytes    int64     `json:"used_storage_bytes"`
-		StorageUsagePercent float64   `json:"storage_usage_percent"`
-		KubernetesVersion   string    `json:"kubernetes_version"`
-		APIServerURL        string    `json:"api_server_url"`
-		LastHeartbeatAt     string    `json:"last_heartbeat_at"`
-		CreatedAt           string    `json:"created_at"`
-		UpdatedAt           string    `json:"updated_at"`
+		NodeCount           int         `json:"node_count"`
+		Nodes               []*service.NodeWithDetails `json:"nodes,omitempty"`
+		TotalCPUCores       int         `json:"total_cpu_cores"`
+		UsedCPUCores        float64     `json:"used_cpu_cores"`
+		CPUUsagePercent     float64     `json:"cpu_usage_percent"`
+		TotalMemoryBytes    int64       `json:"total_memory_bytes"`
+		UsedMemoryBytes     int64       `json:"used_memory_bytes"`
+		MemoryUsagePercent  float64     `json:"memory_usage_percent"`
+		TotalStorageBytes   int64       `json:"total_storage_bytes"`
+		UsedStorageBytes    int64       `json:"used_storage_bytes"`
+		StorageUsagePercent float64     `json:"storage_usage_percent"`
+		KubernetesVersion   string      `json:"kubernetes_version"`
+		APIServerURL        string      `json:"api_server_url"`
+		LastHeartbeatAt     string      `json:"last_heartbeat_at"`
+		CreatedAt           string      `json:"created_at"`
+		UpdatedAt           string      `json:"updated_at"`
 	}{
 		ID:                  cluster.Cluster.ID,
 		Name:                cluster.Cluster.Name,
@@ -318,11 +361,16 @@ func (h *ClusterHandler) GetCluster(c *gin.Context) {
 		Version:             cluster.State.KubernetesVersion,
 		Labels:              convertLabels(cluster.Cluster.Labels),
 		NodeCount:           cluster.State.NodeCount,
-		TotalCPUCores:       cluster.State.TotalCPUCores,
-		TotalMemoryBytes:    cluster.State.TotalMemoryBytes,
-		TotalStorageBytes:   cluster.State.TotalStorageBytes,
-		UsedStorageBytes:    cluster.State.UsedStorageBytes,
-		StorageUsagePercent: cluster.State.StorageUsagePercent,
+		Nodes:               nodesWithDetails,
+		TotalCPUCores:       func() int { if resource != nil { return resource.TotalCPUCores }; return 0 }(),
+		UsedCPUCores:        func() float64 { if resource != nil { return resource.UsedCPUCores }; return 0 }(),
+		CPUUsagePercent:     func() float64 { if resource != nil { return resource.CPUUsagePercent }; return 0 }(),
+		TotalMemoryBytes:    func() int64 { if resource != nil { return resource.TotalMemoryBytes }; return 0 }(),
+		UsedMemoryBytes:     func() int64 { if resource != nil { return resource.UsedMemoryBytes }; return 0 }(),
+		MemoryUsagePercent:  func() float64 { if resource != nil { return resource.MemoryUsagePercent }; return 0 }(),
+		TotalStorageBytes:   func() int64 { if resource != nil { return resource.TotalStorageBytes }; return 0 }(),
+		UsedStorageBytes:    func() int64 { if resource != nil { return resource.UsedStorageBytes }; return 0 }(),
+		StorageUsagePercent: func() float64 { if resource != nil { return resource.StorageUsagePercent }; return 0 }(),
 		KubernetesVersion:   cluster.State.KubernetesVersion,
 		APIServerURL:        cluster.State.APIServerURL,
 		LastHeartbeatAt: func() string {
@@ -357,9 +405,33 @@ func (h *ClusterHandler) DeleteCluster(c *gin.Context) {
 		return
 	}
 
+	// 获取集群信息用于审计日志
+	cluster, err := h.clusterService.GetClusterWithState(id.String())
+	if err != nil {
+		utils.Error(c, http.StatusNotFound, "Cluster not found")
+		return
+	}
+
 	if err := h.clusterService.Delete(id.String()); err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to delete cluster: %v", err)
 		return
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		h.auditService.LogClusterOperation(
+			id,
+			"delete",
+			"cluster",
+			user,
+			map[string]interface{}{
+				"name":        cluster.Cluster.Name,
+				"description": cluster.Cluster.Description,
+				"status":      cluster.State.Status,
+			},
+			nil,
+		)
 	}
 
 	utils.Success(c, http.StatusOK, gin.H{"message": "Cluster deleted"})
@@ -410,6 +482,25 @@ func (h *ClusterHandler) CreateClusterByMachines(c *gin.Context) {
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to create cluster: %v", err)
 		return
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		// 注意：此时集群尚未真正创建，只记录创建任务
+		h.auditService.LogClusterOperation(
+			uuid.Nil, // 集群ID尚未生成
+			"create_by_machines",
+			"cluster",
+			user,
+			nil,
+			map[string]interface{}{
+				"cluster_name":  req.ClusterName,
+				"machine_count": len(req.MachineIDs),
+				"description":   req.Description,
+				"task_id":       task.ID,
+			},
+		)
 	}
 
 	response := CreateTaskResponse{

@@ -15,6 +15,7 @@ type ImportHandler struct {
 	importService     *service.ImportService
 	healthWorker      *worker.HealthCheckWorker
 	resourceSyncWorker *worker.ResourceSyncWorker
+	auditService      *service.AuditService
 }
 
 type ImportClusterRequest struct {
@@ -51,11 +52,12 @@ type ImportListResponse struct {
 	Total   int64                 `json:"total"`
 }
 
-func NewImportHandler(importService *service.ImportService, healthWorker *worker.HealthCheckWorker, resourceSyncWorker *worker.ResourceSyncWorker) *ImportHandler {
+func NewImportHandler(importService *service.ImportService, healthWorker *worker.HealthCheckWorker, resourceSyncWorker *worker.ResourceSyncWorker, auditService *service.AuditService) *ImportHandler {
 	return &ImportHandler{
 		importService:     importService,
 		healthWorker:      healthWorker,
 		resourceSyncWorker: resourceSyncWorker,
+		auditService:      auditService,
 	}
 }
 
@@ -83,11 +85,34 @@ func (h *ImportHandler) ImportCluster(c *gin.Context) {
 			log.Printf("Triggering health check for cluster ID: %s", importRecord.ClusterID.String())
 			go h.healthWorker.TriggerSync(*importRecord.ClusterID)
 		}
-		
+
 		if h.resourceSyncWorker != nil {
 			log.Printf("Triggering resource sync for cluster ID: %s", importRecord.ClusterID.String())
 			go h.resourceSyncWorker.TriggerSync(*importRecord.ClusterID)
 		}
+	}
+
+	// 记录审计日志
+	if h.auditService != nil {
+		user := "api-user" // TODO: 从上下文中获取实际用户
+		clusterID := uuid.Nil
+		if importRecord.ClusterID != nil {
+			clusterID = *importRecord.ClusterID
+		}
+		h.auditService.LogClusterOperation(
+			clusterID,
+			"import",
+			"cluster",
+			user,
+			nil,
+			map[string]interface{}{
+				"import_id":       importRecord.ID,
+				"import_source":   importRecord.ImportSource,
+				"name":            req.Name,
+				"description":     req.Description,
+				"import_status":   importRecord.ImportStatus,
+			},
+		)
 	}
 
 	response := ImportRecordSummary{

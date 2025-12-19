@@ -58,7 +58,7 @@ func (r *ClusterRepository) Delete(id string) error {
 	return r.db.Unscoped().Delete(cluster).Error
 }
 
-func (r *ClusterRepository) List(params ListClustersParams) ([]*model.Cluster, int64, error) {
+func (r *ClusterRepository) List(params ListClustersParams) ([]*model.ClusterWithState, int64, error) {
 	var clusters []*model.Cluster
 	var total int64
 
@@ -82,8 +82,32 @@ func (r *ClusterRepository) List(params ListClustersParams) ([]*model.Cluster, i
 	err = query.Offset(params.Offset).Limit(params.Limit).
 		Order("created_at DESC").
 		Find(&clusters).Error
+	if err != nil {
+		return nil, 0, err
+	}
 
-	return clusters, total, err
+	// 批量获取 cluster_state 和节点数量
+	result := make([]*model.ClusterWithState, 0, len(clusters))
+	for _, cluster := range clusters {
+		// 获取 cluster_state
+		var state model.ClusterState
+		err = r.db.Where("cluster_id = ?", cluster.ID).First(&state).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return nil, 0, err
+		}
+
+		// 如果没有 KubernetesVersion，记录需要同步
+		if state.KubernetesVersion == "" {
+			state.KubernetesVersion = "pending-sync"
+		}
+
+		result = append(result, &model.ClusterWithState{
+			Cluster: cluster,
+			State:   &state,
+		})
+	}
+
+	return result, total, nil
 }
 
 func (r *ClusterRepository) FindActiveClusters() ([]*model.Cluster, error) {
@@ -119,6 +143,11 @@ func (r *ClusterRepository) GetWithState(id string) (*model.ClusterWithState, er
 	err = r.db.Where("cluster_id = ?", cluster.ID).First(&state).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err
+	}
+
+	// 如果没有 KubernetesVersion，记录需要同步
+	if state.KubernetesVersion == "" {
+		state.KubernetesVersion = "pending-sync"
 	}
 
 	return &model.ClusterWithState{

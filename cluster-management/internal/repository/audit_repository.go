@@ -32,7 +32,12 @@ func (r *AuditRepository) ListByCluster(clusterID uuid.UUID, params AuditListPar
 	var events []*model.AuditEvent
 	var total int64
 
-	query := r.db.Model(&model.AuditEvent{}).Where("cluster_id = ?", clusterID)
+	query := r.db.Model(&model.AuditEvent{})
+
+	// 如果 clusterID 不是 nil，则按集群过滤；否则查询所有记录
+	if clusterID != uuid.Nil {
+		query = query.Where("cluster_id = ?", clusterID)
+	}
 
 	if params.EventType != "" {
 		query = query.Where("event_type = ?", params.EventType)
@@ -43,7 +48,7 @@ func (r *AuditRepository) ListByCluster(clusterID uuid.UUID, params AuditListPar
 	}
 
 	if params.User != "" {
-		query = query.Where("user = ?", params.User)
+		query = query.Where("username = ?", params.User)
 	}
 
 	if !params.StartTime.IsZero() {
