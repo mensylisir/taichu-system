@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"infra-management/internal/models"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,10 +18,26 @@ func NewHandler(db *sql.DB) *Handler {
 }
 
 func (h *Handler) GetVMs(c *gin.Context) {
+	// 获取分页参数
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+	// 计算偏移量
+	offset := (page - 1) * limit
+
+	// 查询总数
+	var total int
+	err := h.db.QueryRow("SELECT COUNT(*) FROM vms").Scan(&total)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 查询分页数据
 	rows, err := h.db.Query(`
 		SELECT id, name, os, status, cpu, memory, storage, ip, cluster, created_at
-		FROM vms ORDER BY created_at DESC
-	`)
+		FROM vms ORDER BY created_at DESC LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -44,14 +61,37 @@ func (h *Handler) GetVMs(c *gin.Context) {
 		response = append(response, *vm.ToResponse())
 	}
 
-	c.JSON(http.StatusOK, response)
+	// 返回分页信息和数据
+	c.JSON(http.StatusOK, gin.H{
+		"data": response,
+		"total": total,
+		"page": page,
+		"limit": limit,
+		"totalPages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *Handler) GetStorages(c *gin.Context) {
+	// 获取分页参数
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+	// 计算偏移量
+	offset := (page - 1) * limit
+
+	// 查询总数
+	var total int
+	err := h.db.QueryRow("SELECT COUNT(*) FROM storages").Scan(&total)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 查询分页数据
 	rows, err := h.db.Query(`
 		SELECT id, name, type, capacity, iops, status, mounted_to, created_at
-		FROM storages ORDER BY created_at DESC
-	`)
+		FROM storages ORDER BY created_at DESC LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -79,14 +119,37 @@ func (h *Handler) GetStorages(c *gin.Context) {
 		response = append(response, *s.ToResponse())
 	}
 
-	c.JSON(http.StatusOK, response)
+	// 返回分页信息和数据
+	c.JSON(http.StatusOK, gin.H{
+		"data": response,
+		"total": total,
+		"page": page,
+		"limit": limit,
+		"totalPages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *Handler) GetFirewallRules(c *gin.Context) {
+	// 获取分页参数
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+	// 计算偏移量
+	offset := (page - 1) * limit
+
+	// 查询总数
+	var total int
+	err := h.db.QueryRow("SELECT COUNT(*) FROM firewall_rules").Scan(&total)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 查询分页数据
 	rows, err := h.db.Query(`
 		SELECT id, name, protocol, port, source_ip, target_ip, action, status, created_at
-		FROM firewall_rules ORDER BY created_at DESC
-	`)
+		FROM firewall_rules ORDER BY created_at DESC LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -110,5 +173,12 @@ func (h *Handler) GetFirewallRules(c *gin.Context) {
 		response = append(response, *rule.ToResponse())
 	}
 
-	c.JSON(http.StatusOK, response)
+	// 返回分页信息和数据
+	c.JSON(http.StatusOK, gin.H{
+		"data": response,
+		"total": total,
+		"page": page,
+		"limit": limit,
+		"totalPages": (total + limit - 1) / limit,
+	})
 }
