@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: taichu-cluster-management-service
+  namespace: taichu-system
+  labels:
+    app: taichu-cluster-management
+    component: api-server
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8081
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: taichu-cluster-management
+    component: api-server
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: taichu-system
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: postgres
+    protocol: TCP
+  selector:
+    app: postgres
+---
+# Headless Service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: taichu-system
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: postgres
+  selector:
+    app: postgres

@@ -1,0 +1,26 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taichu-cluster-management-pdb
+  namespace: taichu-system
+  labels:
+    app: taichu-cluster-management
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: taichu-cluster-management
+      component: api-server
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: taichu-system
+  labels:
+    app: postgres
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: postgres

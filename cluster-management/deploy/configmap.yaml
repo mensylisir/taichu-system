@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taichu-cluster-management-config
+  namespace: taichu-system
+  labels:
+    app: taichu-cluster-management
+    version: v1.0.0
+data:
+  # 服务器配置
+  config.yaml: |
+    # 服务器配置
+    server:
+      port: "8081"
+      mode: "release"
+      read_timeout: 60s
+      write_timeout: 60s
+
+    # 数据库配置
+    database:
+      host: "172.30.1.12"
+      port: 32172
+      username: "postgres"
+      password: "Def@u1tpwd"
+      dbname: "taichu"
+      sslmode: "disable"
+      timezone: "Asia/Shanghai"
+      charset: "utf8"
+      options: "-c client_encoding=UTF8"
+      max_idle_conns: 10
+      max_open_conns: 100
+      conn_max_lifetime: 3600s
+      auto_migrate: true
+      auto_create_db: true
+
+    # 加密配置
+    encryption:
+      key: "${ENCRYPTION_KEY}"
+      algorithm: "AES-256-GCM"
+
+    # 集群管理配置
+    cluster_manager:
+      client_timeout: 30s
+      max_clients: 100
+      cleanup_interval: 30m
+
+    # Worker配置
+    worker:
+      enabled: true
+      check_interval: 5m
+      max_concurrency: 10
+      retry_attempts: 3
+      retry_delay: 30s
+
+    # 日志配置
+    logging:
+      level: "info"
+      format: "json"
+      output: "stdout"
+
+    # Kubernetes配置
+    kubernetes:
+      qps: 50
+      burst: 100
+      timeout: 30s

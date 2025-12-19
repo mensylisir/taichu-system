@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taichu-cluster-management
+  namespace: taichu-system
+  labels:
+    app: taichu-cluster-management
+    version: v1.0.0
+    component: api-server
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: taichu-cluster-management
+      component: api-server
+  template:
+    metadata:
+      labels:
+        app: taichu-cluster-management
+        component: api-server
+        version: v1.0.0
+    spec:
+      serviceAccountName: taichu-cluster-management
+      imagePullSecrets:
+      - name: taichu-registry-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: api-server
+        image: registry.dev.rdev.tech:18093/taichu/cluster-management:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8081
+          protocol: TCP
+        env:
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: postgres-password
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: taichu-cluster-management-secret
+              key: encryption-key
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: taichu-cluster-management-secret
+              key: jwt-secret
+        - name: ADMIN_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: taichu-cluster-management-secret
+              key: admin-username
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: taichu-cluster-management-secret
+              key: admin-password
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/configs
+          readOnly: true
+        - name: logs-volume
+          mountPath: /app/logs
+        livenessProbe:
+          httpGet:
+            path: /api/v1/auth/token
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/v1/auth/token
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: taichu-cluster-management-config
+      - name: logs-volume
+        emptyDir: {}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: taichu-cluster-management
+  namespace: taichu-system
+  labels:
+    app: taichu-cluster-management
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: taichu-cluster-management
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "services"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: taichu-cluster-management
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: taichu-cluster-management
+subjects:
+- kind: ServiceAccount
+  name: taichu-cluster-management
+  namespace: taichu-system

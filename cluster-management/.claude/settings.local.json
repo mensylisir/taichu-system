@@ -37,7 +37,8 @@
       "Bash(./main.exe:*)",
       "Bash(ls:*)",
       "Bash(cmd /c:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(kubectl:*)"
     ]
   }
 }

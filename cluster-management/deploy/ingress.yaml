@@ -1,0 +1,63 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: taichu-cluster-management-ingress
+  namespace: taichu-system
+  labels:
+    app: taichu-cluster-management
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - api.taichu.example.com
+    secretName: taichu-cluster-management-tls
+  rules:
+  - host: api.taichu.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: taichu-cluster-management-service
+            port:
+              number: 8081
+---
+# 如果使用不同的域名，可以创建多个 Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: taichu-cluster-management-web
+  namespace: taichu-system
+  labels:
+    app: taichu-cluster-management
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - taichu.example.com
+    secretName: taichu-web-tls
+  rules:
+  - host: taichu.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: taichu-cluster-management-service
+            port:
+              number: 8081

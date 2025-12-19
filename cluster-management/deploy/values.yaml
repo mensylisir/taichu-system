@@ -1,0 +1,242 @@
+# 太初集群管理系统 Helm Chart 配置
+# 版本: v1.0.0
+
+# 全局配置
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# 镜像配置
+image:
+  repository: taichu/cluster-management
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# 服务账户配置
+serviceAccount:
+  create: true
+  annotations: {}
+  name: "taichu-cluster-management"
+
+# 部署配置
+deployment:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+
+  # 资源限制
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+
+  # 健康检查
+  healthCheck:
+    enabled: true
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+  # 安全上下文
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+
+# 服务配置
+service:
+  type: ClusterIP
+  port: 8081
+  targetPort: 8081
+
+# Ingress 配置
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: api.taichu.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: taichu-cluster-management-tls
+      hosts:
+        - api.taichu.example.com
+
+# 配置配置
+config:
+  # 服务器配置
+  server:
+    port: 8081
+    mode: release
+    read_timeout: 60s
+    write_timeout: 60s
+
+  # 数据库配置
+  database:
+    host: postgres-service
+    port: 5432
+    username: postgres
+    dbname: taichu
+    sslmode: disable
+    timezone: Asia/Shanghai
+    charset: utf8
+    max_idle_conns: 10
+    max_open_conns: 100
+    conn_max_lifetime: 3600s
+    auto_migrate: true
+    auto_create_db: true
+
+  # 加密配置
+  encryption:
+    algorithm: AES-256-GCM
+
+  # 集群管理配置
+  cluster_manager:
+    client_timeout: 30s
+    max_clients: 100
+    cleanup_interval: 30m
+
+  # Worker 配置
+  worker:
+    enabled: true
+    check_interval: 5m
+    max_concurrency: 10
+    retry_attempts: 3
+    retry_delay: 30s
+
+  # 日志配置
+  logging:
+    level: info
+    format: json
+    output: stdout
+
+  # Kubernetes 配置
+  kubernetes:
+    qps: 50
+    burst: 100
+    timeout: 30s
+
+# Secret 配置
+secret:
+  create: true
+  jwtSecret: ""
+  encryptionKey: ""
+  adminUsername: admin
+  adminPassword: admin
+
+# PostgreSQL 配置
+postgres:
+  enabled: true
+  auth:
+    username: postgres
+    password: ""
+    database: taichu
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: ""
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+# HPA 配置
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# VPA 配置
+vpa:
+  enabled: true
+  updateMode: Auto
+
+# PodDisruptionBudget 配置
+pdb:
+  enabled: true
+  minAvailable: 1
+
+# NetworkPolicy 配置
+networkPolicy:
+  enabled: true
+
+# 监控配置
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+  prometheusRule:
+    enabled: false
+
+# 日志配置
+logging:
+  enabled: false
+  logLevel: info
+
+# 持久化存储
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 20Gi
+  storageClass: ""
+
+# 节点选择器
+nodeSelector: {}
+
+# 容忍度
+tolerations: []
+
+# 亲和性
+affinity: {}
+
+# 额外配置
+extraVolumes: []
+extraVolumeMounts: []
+
+# 额外环境变量
+extraEnvVars: []
+
+# 额外容器
+extraContainers: []
+
+# 初始化容器
+initContainers: []
+
+# 侧车容器
+sidecars: []
+
+# 生命周期钩子
+lifecycle: {}

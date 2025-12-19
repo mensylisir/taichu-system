@@ -1,0 +1,85 @@
+# Kustomization for Taichu Cluster Management System
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 命名空间
+namespace: taichu-system
+
+# 通用标签
+commonLabels:
+  app: taichu-cluster-management
+  version: v1.0.0
+
+# 资源配置
+resources:
+  - configmap.yaml
+  - secret.yaml
+  - postgres.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+
+# 配置覆盖
+patches:
+  # 修改副本数
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+    target:
+      kind: Deployment
+      name: taichu-cluster-management
+
+  # 修改资源限制
+  - patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "2000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "2Gi"
+    target:
+      kind: Deployment
+      name: taichu-cluster-management
+
+# 镜像配置
+images:
+  - name: taichu/cluster-management
+    newTag: "v1.0.0"
+    # 如果使用私有仓库，可以配置 imagePullSecrets
+    # newName: registry.example.com/taichu/cluster-management
+
+# 配置映射配置
+configMapGenerator:
+  - name: taichu-cluster-management-config
+    files:
+      - config.yaml=config.yaml
+
+# Secret 配置
+secretGenerator:
+  - name: postgres-secret
+    literals:
+      - postgres-password=$(openssl rand -base64 32)
+      - postgres-username=postgres
+  - name: taichu-cluster-management-secret
+    literals:
+      - database-password=$(openssl rand -base64 32)
+      - jwt-secret=$(openssl rand -base64 32)
+      - encryption-key=$(openssl rand -base64 32)
+      - admin-username=admin
+      - admin-password=admin
+
+# 资源配置
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    app: taichu-cluster-management
+    version: v1.0.0
+
+# 基础设施管理
+# 如果使用 cert-manager 管理证书，可以添加
+# certManager:
+#   clusterIssuer: letsencrypt-prod

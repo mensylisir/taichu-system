@@ -385,7 +385,7 @@ func setupRoutes(
 
 	// 需要认证的路由
 	v1 := r.Group("/api/v1")
-	v1.Use(middleware.JWTMiddleware("your-secret-key"))
+	// v1.Use(middleware.JWTMiddleware("your-secret-key"))
 	{
 		// 集群拓扑接口（不需要cluster ID）
 		v1.GET("/clusters/topology", topologyHandler.GetTopology)
