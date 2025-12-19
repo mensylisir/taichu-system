@@ -1,6 +1,7 @@
 package service
 
 import (
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/taichu-system/cluster-management/internal/model"
@@ -116,4 +117,29 @@ func (s *AuditService) LogBackupOperation(clusterID uuid.UUID, operation, backup
 
 func (s *AuditService) GetAuditLogs(clusterID uuid.UUID, params repository.AuditListParams) ([]*model.AuditEvent, int64, error) {
 	return s.auditRepo.ListByCluster(clusterID, params)
+}
+
+func (s *AuditService) CreateAuditEventWithTimestamp(clusterID uuid.UUID, eventType, action, resource, resourceID, user, ipAddress, userAgent string, oldValue, newValue map[string]interface{}, details map[string]interface{}, result string, timestamp time.Time) error {
+	auditEvent := &model.AuditEvent{
+		ClusterID:  clusterID,
+		EventType:  eventType,
+		Action:     action,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Username:   user,
+		IPAddress:  ipAddress,
+		UserAgent:  userAgent,
+		OldValue:   oldValue,
+		NewValue:   newValue,
+		Details:    details,
+		Result:     result,
+		Timestamp:  timestamp,
+		CreatedAt:  timestamp,
+	}
+
+	if result == "failed" && details["error"] != nil {
+		auditEvent.ErrorMsg = details["error"].(string)
+	}
+
+	return s.auditRepo.Create(auditEvent)
 }

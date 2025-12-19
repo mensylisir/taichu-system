@@ -206,6 +206,85 @@ func (h *AuditHandler) ListAllAuditEvents(c *gin.Context) {
 	utils.Success(c, http.StatusOK, response)
 }
 
+// CreateAuditEventRequest 创建审计事件请求
+type CreateAuditEventRequest struct {
+	ClusterID  string                 `json:"cluster_id"`
+	EventType  string                 `json:"event_type" binding:"required"`
+	Action     string                 `json:"action" binding:"required"`
+	Resource   string                 `json:"resource" binding:"required"`
+	ResourceID string                 `json:"resource_id"`
+	Username   string                 `json:"username"`
+	IPAddress  string                 `json:"ip_address"`
+	UserAgent  string                 `json:"user_agent"`
+	OldValue   map[string]interface{} `json:"old_value"`
+	NewValue   map[string]interface{} `json:"new_value"`
+	Details    map[string]interface{} `json:"details"`
+	Result     string                 `json:"result"`
+	ErrorMsg   string                 `json:"error_msg"`
+	Timestamp  string                 `json:"timestamp"`
+}
+
+// CreateAuditEvent 创建审计事件
+func (h *AuditHandler) CreateAuditEvent(c *gin.Context) {
+	var req CreateAuditEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		return
+	}
+
+	var clusterID uuid.UUID
+	if req.ClusterID != "" {
+		var err error
+		clusterID, err = uuid.Parse(req.ClusterID)
+		if err != nil {
+			utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+			return
+		}
+	}
+
+	// 解析时间戳
+	var timestamp time.Time
+	if req.Timestamp != "" {
+		var err error
+		timestamp, err = time.Parse("2006-01-02 15:04:05.000 -07:00", req.Timestamp)
+		if err != nil {
+			timestamp, err = time.Parse(time.RFC3339, req.Timestamp)
+			if err != nil {
+				timestamp = time.Now()
+			}
+		}
+	} else {
+		timestamp = time.Now()
+	}
+
+	result := req.Result
+	if result == "" {
+		result = "success"
+	}
+
+	err := h.auditService.CreateAuditEventWithTimestamp(
+		clusterID,
+		req.EventType,
+		req.Action,
+		req.Resource,
+		req.ResourceID,
+		req.Username,
+		req.IPAddress,
+		req.UserAgent,
+		req.OldValue,
+		req.NewValue,
+		req.Details,
+		result,
+		timestamp,
+	)
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "Failed to create audit event: %v", err)
+		return
+	}
+
+	utils.Success(c, http.StatusCreated, gin.H{"message": "Audit event created successfully"})
+}
+
 func convertJSONMap(j map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	for k, v := range j {

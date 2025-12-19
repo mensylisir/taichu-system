@@ -1,8 +1,9 @@
-package main
+package test
 
 import (
 	"fmt"
 	"time"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -15,7 +16,7 @@ type JWTClaims struct {
 
 func main() {
 	secretKey := "your-secret-key"
-	
+
 	// 创建token
 	claims := JWTClaims{
 		UserID:   "test-user-id",
@@ -34,6 +35,6 @@ func main() {
 		fmt.Printf("Error generating token: %v\n", err)
 		return
 	}
-	
+
 	fmt.Printf("Generated JWT token: %s\n", tokenString)
 }

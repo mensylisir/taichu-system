@@ -395,6 +395,7 @@ func setupRoutes(
 	{
 		// 全局审计日志接口（查看所有操作）
 		v1.GET("/audit", auditHandler.ListAllAuditEvents)
+		v1.POST("/audit", auditHandler.CreateAuditEvent)
 
 		// 集群拓扑接口（不需要cluster ID）
 		v1.GET("/clusters/topology", topologyHandler.GetTopology)
