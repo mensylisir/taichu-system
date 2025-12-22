@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 type Handler struct {
@@ -226,15 +227,6 @@ func (h *Handler) getCurrentTime() string {
 	return "2024-12-19 00:00:00" // 简化处理，实际应用中可以使用 time.Now().Format()
 }
 
-// cleanUTF8 清理字符串确保是有效的UTF-8编码
-func cleanUTF8(input string) string {
-	if !utf8.ValidString(input) {
-		// 如果不是有效的UTF-8，返回空字符串
-		return ""
-	}
-	return input
-}
-
 // ImportVMs 导入虚拟机列表
 func (h *Handler) ImportVMs(c *gin.Context) {
 	// 读取上传的文件
@@ -243,6 +235,24 @@ func (h *Handler) ImportVMs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "文件上传失败",
 			"message": err.Error(),
+		})
+		return
+	}
+
+	// 检查文件类型
+	fileName := strings.ToLower(file.Filename)
+	if strings.Contains(fileName, ".xlsx") || strings.Contains(fileName, ".xls") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "不支持XLSX文件",
+			"message": "请使用CSV格式的虚拟机列表文件",
+		})
+		return
+	}
+
+	if !strings.Contains(fileName, ".csv") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "文件格式不支持",
+			"message": "仅支持CSV格式的文件",
 		})
 		return
 	}
@@ -268,18 +278,38 @@ func (h *Handler) ImportVMs(c *gin.Context) {
 		return
 	}
 
-	// 处理编码问题 - 去除BOM头并清理UTF-8
+	// 去除BOM头
 	contentStr := strings.TrimPrefix(string(fileContent), "\xEF\xBB\xBF")
 
-	// 创建CSV reader - 使用strings.NewReader
-	reader := csv.NewReader(strings.NewReader(contentStr))
+	// 尝试检测和转换编码
+	convertedStr := contentStr
+	if !utf8.ValidString(contentStr) {
+		// 如果不是有效的UTF-8，尝试作为GBK解码
+		decoder := simplifiedchinese.GBK.NewDecoder()
+		if decoded, err := decoder.String(contentStr); err == nil && utf8.ValidString(decoded) {
+			convertedStr = decoded
+		}
+	}
 
-	// 读取头部
+	// 创建CSV reader
+	reader := csv.NewReader(strings.NewReader(convertedStr))
+
+	// 尝试读取头部，如果失败则提供更详细的错误信息
 	headers, err := reader.Read()
 	if err != nil {
+		// 如果是编码问题，给出明确的提示
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "invalid") || strings.Contains(errMsg, "encoding") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "CSV文件编码不正确",
+				"message": "请将Excel文件另存为UTF-8编码的CSV文件，然后再导入",
+			})
+			return
+		}
+
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "读取文件头失败",
-			"message": err.Error(),
+			"message": fmt.Sprintf("错误: %s", errMsg),
 		})
 		return
 	}
@@ -314,16 +344,16 @@ func (h *Handler) ImportVMs(c *gin.Context) {
 			continue
 		}
 
-		// 提取数据并进行UTF-8清理
-		vmName := cleanUTF8(record[0])
-		os := cleanUTF8(record[1])
-		status := cleanUTF8(record[2])
-		cpu := cleanUTF8(record[3])
-		memory := cleanUTF8(record[4])
-		storage := cleanUTF8(record[5])
-		ip := cleanUTF8(record[6])
-		cluster := cleanUTF8(record[7])
-		createdTime := cleanUTF8(record[8])
+		// 提取数据
+		vmName := record[0]
+		os := record[1]
+		status := record[2]
+		cpu := record[3]
+		memory := record[4]
+		storage := record[5]
+		ip := record[6]
+		cluster := record[7]
+		createdTime := record[8]
 
 		// 检查虚拟机是否已存在（根据名称）
 		var exists bool
