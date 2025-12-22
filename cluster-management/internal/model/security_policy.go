@@ -19,6 +19,14 @@ type SecurityPolicy struct {
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 
+	// 新增字段
+	RBACDetails              string    `json:"rbac_details" gorm:"type:text"`
+	NetworkPolicyDetails     string    `json:"network_policy_details" gorm:"type:text"`
+	PodSecurityDetails       string    `json:"pod_security_details" gorm:"type:text"`
+	AuditLoggingDetails      string    `json:"audit_logging_details" gorm:"type:text"`
+	CNIPlugin                string    `json:"cni_plugin" gorm:"column:cni_plugin;type:varchar(50)"`
+	PodSecurityAdmissionMode string    `json:"pod_security_admission_mode" gorm:"type:varchar(20);default:'none'"`
+
 	// 关联
 	Cluster Cluster `json:"-" gorm:"foreignKey:ClusterID"`
 }
@@ -36,6 +44,14 @@ type SecurityPolicySummary struct {
 	AuditLoggingEnabled     bool   `json:"audit_logging_enabled"`
 	AuditLoggingMode        string `json:"audit_logging_mode"`
 	Details                 SecurityPolicyDetails `json:"details"`
+	
+	// 新增字段
+	RBACDetails              string `json:"rbac_details"`
+	NetworkPolicyDetails     string `json:"network_policy_details"`
+	PodSecurityDetails       string `json:"pod_security_details"`
+	AuditLoggingDetails      string `json:"audit_logging_details"`
+	CNIPlugin                string `json:"cni_plugin"`
+	PodSecurityAdmissionMode string `json:"pod_security_admission_mode"`
 }
 
 type SecurityPolicyDetails struct {
@@ -43,6 +59,10 @@ type SecurityPolicyDetails struct {
 	NetworkPoliciesCount int    `json:"network_policies_count"`
 	RBACRolesCount       int    `json:"rbac_roles_count"`
 	AuditEnabled         bool   `json:"audit_enabled"`
+	
+	// 新增字段
+	CNIPlugin                string `json:"cni_plugin"`
+	PodSecurityAdmissionMode string `json:"pod_security_admission_mode"`
 }
 
 func (sp SecurityPolicy) ToSecurityPolicySummary() SecurityPolicySummary {
@@ -59,6 +79,15 @@ func (sp SecurityPolicy) ToSecurityPolicySummary() SecurityPolicySummary {
 			NetworkPoliciesCount: sp.NetworkPoliciesCount,
 			RBACRolesCount:       sp.RBACRolesCount,
 			AuditEnabled:         sp.AuditLoggingEnabled,
+			CNIPlugin:           sp.CNIPlugin,
+			PodSecurityAdmissionMode: sp.PodSecurityAdmissionMode,
 		},
+		// 新增字段
+		RBACDetails:              sp.RBACDetails,
+		NetworkPolicyDetails:     sp.NetworkPolicyDetails,
+		PodSecurityDetails:       sp.PodSecurityDetails,
+		AuditLoggingDetails:      sp.AuditLoggingDetails,
+		CNIPlugin:                sp.CNIPlugin,
+		PodSecurityAdmissionMode: sp.PodSecurityAdmissionMode,
 	}
-}
+}

@@ -7,23 +7,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 	"github.com/taichu-system/cluster-management/internal/service"
+	"gorm.io/gorm"
 )
 
 type HealthCheckWorker struct {
-	clusterRepo     *repository.ClusterRepository
-	stateRepo       *repository.ClusterStateRepository
-	clusterManager  *service.ClusterManager
-	encryptionSvc   *service.EncryptionService
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
-	checkInterval   time.Duration
-	maxConcurrency  int
-	sem             chan struct{}
+	clusterRepo    *repository.ClusterRepository
+	stateRepo      *repository.ClusterStateRepository
+	clusterManager *service.ClusterManager
+	encryptionSvc  *service.EncryptionService
+	wg             sync.WaitGroup
+	ctx            context.Context
+	cancel         context.CancelFunc
+	checkInterval  time.Duration
+	maxConcurrency int
+	sem            chan struct{}
 }
 
 func NewHealthCheckWorker(
@@ -35,15 +35,15 @@ func NewHealthCheckWorker(
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &HealthCheckWorker{
-		clusterRepo:     clusterRepo,
-		stateRepo:       stateRepo,
-		clusterManager:  clusterManager,
-		encryptionSvc:   encryptionSvc,
-		ctx:             ctx,
-		cancel:          cancel,
-		checkInterval:   5 * time.Minute,
-		maxConcurrency:  10,
-		sem:             make(chan struct{}, 10),
+		clusterRepo:    clusterRepo,
+		stateRepo:      stateRepo,
+		clusterManager: clusterManager,
+		encryptionSvc:  encryptionSvc,
+		ctx:            ctx,
+		cancel:         cancel,
+		checkInterval:  5 * time.Minute,
+		maxConcurrency: 10,
+		sem:            make(chan struct{}, 10),
 	}
 }
 
@@ -104,13 +104,10 @@ func (w *HealthCheckWorker) checkCluster(cluster model.Cluster) {
 	defer func() { <-w.sem }()
 
 	log.Printf("[HEALTH-CHECK] Starting check for cluster %s (ID: %s)", cluster.Name, cluster.ID.String())
-	log.Printf("[HEALTH-CHECK] Kubeconfig encrypted length: %d, nonce length: %d",
-		len(cluster.KubeconfigEncrypted), len(cluster.KubeconfigNonce))
+	log.Printf("[HEALTH-CHECK] Kubeconfig encrypted length: %d",
+		len(cluster.KubeconfigEncrypted))
 
-	kubeconfig, err := w.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	kubeconfig, err := w.encryptionSvc.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		log.Printf("[HEALTH-CHECK] Failed to decrypt kubeconfig for cluster %s (ID: %s): %v", cluster.Name, cluster.ID.String(), err)
 		w.updateClusterState(cluster.ID, false, err.Error())
@@ -152,23 +149,21 @@ func (w *HealthCheckWorker) updateClusterState(
 			// 健康检查失败，更新失败状态并清除集群数据
 			log.Printf("Health check failed for cluster %s, setting status to disconnected", clusterID)
 			if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID).Updates(map[string]interface{}{
-				"status":               "disconnected",
-				"node_count":           0,
-				"total_cpu_cores":      0,
-				"total_memory_bytes":   0,
-				"kubernetes_version":   "",
-				"api_server_url":       "",
-				"last_heartbeat_at":    nil,
-				"last_sync_at":         time.Now(),
-				"sync_success":         false,
-				"updated_at":           time.Now(),
+				"status":             "disconnected",
+				"node_count":         0,
+				"kubernetes_version": "",
+				"api_server_url":     "",
+				"last_heartbeat_at":  nil,
+				"last_sync_at":       time.Now(),
+				"sync_success":       false,
+				"updated_at":         time.Now(),
 			}).Error; err != nil {
 				return err
 			}
 			if errMsg, ok := result.(string); ok {
 				if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID).Updates(map[string]interface{}{
-					"sync_error":    errMsg,
-					"updated_at":    time.Now(),
+					"sync_error": errMsg,
+					"updated_at": time.Now(),
 				}).Error; err != nil {
 					return err
 				}
@@ -178,15 +173,15 @@ func (w *HealthCheckWorker) updateClusterState(
 				// 健康检查成功，更新健康检查相关字段
 				log.Printf("Health check succeeded for cluster %s, setting status to %s", clusterID, healthResult.Status)
 				if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID).Updates(map[string]interface{}{
-					"status":               healthResult.Status,
-					"node_count":           healthResult.NodeCount,
-					"kubernetes_version":   healthResult.Version,
-					"api_server_url":       healthResult.APIServerURL,
-					"last_heartbeat_at":    healthResult.LastHeartbeatAt,
-					"last_sync_at":         time.Now(),
-					"sync_success":         true,
-					"sync_error":           "",
-					"updated_at":           time.Now(),
+					"status":             healthResult.Status,
+					"node_count":         healthResult.NodeCount,
+					"kubernetes_version": healthResult.Version,
+					"api_server_url":     healthResult.APIServerURL,
+					"last_heartbeat_at":  healthResult.LastHeartbeatAt,
+					"last_sync_at":       time.Now(),
+					"sync_success":       true,
+					"sync_error":         "",
+					"updated_at":         time.Now(),
 				}).Error; err != nil {
 					return err
 				}

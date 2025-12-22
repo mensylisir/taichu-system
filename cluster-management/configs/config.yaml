@@ -36,10 +36,11 @@ cluster_manager:
 # Worker配置
 worker:
   enabled: true
-  check_interval: 5m
-  max_concurrency: 10
+  check_interval: 15m
+  max_concurrency: 3
   retry_attempts: 3
   retry_delay: 30s
+  use_informer_mode: false
 
 # 日志配置
 logging:
@@ -49,6 +50,6 @@ logging:
 
 # Kubernetes配置
 kubernetes:
-  qps: 50
-  burst: 100
+  qps: 20
+  burst: 40
   timeout: 30s

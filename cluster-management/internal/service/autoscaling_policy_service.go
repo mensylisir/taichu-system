@@ -65,10 +65,7 @@ func (s *AutoscalingPolicyService) SyncAutoscalingPolicyFromKubernetes(clusterID
 		return fmt.Errorf("failed to get cluster: %w", err)
 	}
 
-	kubeconfig, err := s.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	kubeconfig, err := s.encryptionSvc.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt kubeconfig: %w", err)
 	}
@@ -114,10 +111,7 @@ func (s *AutoscalingPolicyService) getHPAPolicies(clusterID string) []HPAPolicy 
 		return nil
 	}
 
-	kubeconfig, err := s.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	kubeconfig, err := s.encryptionSvc.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		return nil
 	}
@@ -152,3 +146,4 @@ func (s *AutoscalingPolicyService) checkClusterAutoscaler(ctx context.Context, c
 	_, err := clientset.AppsV1().Deployments("kube-system").Get(ctx, "cluster-autoscaler", metav1.GetOptions{})
 	return err == nil
 }
+

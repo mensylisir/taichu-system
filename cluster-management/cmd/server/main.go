@@ -93,10 +93,28 @@ func main() {
 		log.Println("Starting health check worker...")
 		healthCheckWorker.Start()
 		defer healthCheckWorker.Stop()
-		
+
 		log.Println("Starting resource sync worker...")
-		resourceSyncWorker.Start()
-		defer resourceSyncWorker.Stop()
+		if cfg.Worker.UseInformerMode {
+			log.Println("Using Informer-based resource sync worker")
+			informerResourceSyncWorker := worker.NewInformerResourceSyncWorker(
+				clusterRepo,
+				nodeRepo,
+				eventRepo,
+				clusterResourceRepo,
+				stateRepo,
+				autoscalingPolicyRepo,
+				securityPolicyRepo,
+				clusterManager,
+				encryptionService,
+			)
+			informerResourceSyncWorker.Start()
+			defer informerResourceSyncWorker.Stop()
+		} else {
+			log.Println("Using traditional polling-based resource sync worker")
+			resourceSyncWorker.Start()
+			defer resourceSyncWorker.Stop()
+		}
 	} else {
 		log.Println("Worker is disabled in configuration")
 	}
@@ -123,11 +141,15 @@ func main() {
 		clusterRepo,
 	)
 
+	// 创建KubernetesService实例
+	kubernetesService := service.NewKubernetesService()
+
 	securityPolicyService := service.NewSecurityPolicyService(
-		clusterManager,
-		encryptionService,
 		securityPolicyRepo,
 		clusterRepo,
+		clusterManager,
+		encryptionService,
+		kubernetesService,
 	)
 
 	autoscalingPolicyService := service.NewAutoscalingPolicyService(

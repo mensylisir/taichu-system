@@ -41,7 +41,7 @@ func NewImportService(
 	}
 }
 
-func (s *ImportService) ImportCluster(importSource, name, description, environmentType, kubeconfig string, labels map[string]string) (*model.ImportRecord, error) {
+func (s *ImportService) ImportCluster(importSource, name, description, environmentType, region, kubeconfig string, labels map[string]string) (*model.ImportRecord, error) {
 	log.Printf("Starting ImportCluster with importSource=%s, name=%s", importSource, name)
 	
 	// 验证kubeconfig
@@ -77,7 +77,7 @@ func (s *ImportService) ImportCluster(importSource, name, description, environme
 	log.Printf("Import record created with ID: %s", importRecord.ID.String())
 
 	// 创建集群记录
-	encryptedKubeconfig, nonce, err := s.encryptionSvc.Encrypt(kubeconfig)
+	encryptedKubeconfig, err := s.encryptionSvc.Encrypt(kubeconfig)
 	if err != nil {
 		log.Printf("Failed to encrypt kubeconfig: %v", err)
 		return nil, fmt.Errorf("failed to encrypt kubeconfig: %w", err)
@@ -105,9 +105,9 @@ func (s *ImportService) ImportCluster(importSource, name, description, environme
 		Name:                name,
 		Description:         description,
 		KubeconfigEncrypted: encryptedKubeconfig,
-		KubeconfigNonce:     nonce,
 		Labels:              clusterLabels,
 		EnvironmentType:     environmentType,
+		Region:              region,
 		Provider:            "太初",
 		CreatedBy:           "api-user",
 		ImportSource:        importSource,
@@ -166,10 +166,7 @@ func (s *ImportService) ExecuteImport(importID string) error {
 	log.Printf("Got cluster: ID=%s, Name=%s", cluster.ID, cluster.Name)
 
 	// 验证集群连接
-	kubeconfig, err := s.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	kubeconfig, err := s.encryptionSvc.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		log.Printf("Failed to decrypt kubeconfig: %v", err)
 		return s.handleImportError(importRecord, fmt.Errorf("failed to decrypt kubeconfig: %w", err))
@@ -269,3 +266,5 @@ func (s *ImportService) ListImports(importSource, status string) ([]*model.Impor
 func (s *ImportService) DeleteImport(importID string) error {
 	return s.importRepo.Delete(importID)
 }
+
+

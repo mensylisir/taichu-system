@@ -21,6 +21,14 @@ type SecurityPolicyResponse struct {
 	RBACRolesCount          int    `json:"rbac_roles_count"`
 	AuditLoggingEnabled     bool   `json:"audit_logging_enabled"`
 	AuditLoggingMode        string `json:"audit_logging_mode"`
+	
+	// 新增字段
+	RBACDetails              string `json:"rbac_details"`
+	NetworkPolicyDetails     string `json:"network_policy_details"`
+	PodSecurityDetails       string `json:"pod_security_details"`
+	AuditLoggingDetails      string `json:"audit_logging_details"`
+	CNIPlugin                string `json:"cni_plugin"`
+	PodSecurityAdmissionMode string `json:"pod_security_admission_mode"`
 }
 
 func NewSecurityPolicyHandler(securityPolicyService *service.SecurityPolicyService) *SecurityPolicyHandler {
@@ -38,7 +46,7 @@ func (h *SecurityPolicyHandler) GetSecurityPolicy(c *gin.Context) {
 		return
 	}
 
-	policy, err := h.securityPolicyService.GetSecurityPolicy(id.String())
+	policy, err := h.securityPolicyService.GetSecurityPolicy(c.Request.Context(), id.String())
 	if err != nil {
 		utils.Error(c, http.StatusNotFound, "Security policy not found")
 		return
@@ -52,7 +60,14 @@ func (h *SecurityPolicyHandler) GetSecurityPolicy(c *gin.Context) {
 		RBACRolesCount:          policy.RBACRolesCount,
 		AuditLoggingEnabled:     policy.AuditLoggingEnabled,
 		AuditLoggingMode:        policy.AuditLoggingMode,
+		// 新增字段
+		RBACDetails:              policy.RBACDetails,
+		NetworkPolicyDetails:     policy.NetworkPolicyDetails,
+		PodSecurityDetails:       policy.PodSecurityDetails,
+		AuditLoggingDetails:      policy.AuditLoggingDetails,
+		CNIPlugin:                policy.CNIPlugin,
+		PodSecurityAdmissionMode:  policy.PodSecurityAdmissionMode,
 	}
 
 	utils.Success(c, http.StatusOK, response)
-}
+}

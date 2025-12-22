@@ -4,109 +4,111 @@ import (
 	"context"
 	"fmt"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-
+	"github.com/google/uuid"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 )
 
+// SecurityPolicyService 安全策略服务
 type SecurityPolicyService struct {
-	clusterManager      *ClusterManager
-	encryptionSvc       *EncryptionService
-	securityPolicyRepo  *repository.SecurityPolicyRepository
-	clusterRepo         *repository.ClusterRepository
+	securityPolicyRepo *repository.SecurityPolicyRepository
+	clusterRepo        *repository.ClusterRepository
+	clusterManager     *ClusterManager
+	encryptionService  *EncryptionService
+	kubernetesService  KubernetesService
 }
 
+// NewSecurityPolicyService 创建新的安全策略服务
 func NewSecurityPolicyService(
-	clusterManager *ClusterManager,
-	encryptionSvc *EncryptionService,
 	securityPolicyRepo *repository.SecurityPolicyRepository,
 	clusterRepo *repository.ClusterRepository,
+	clusterManager *ClusterManager,
+	encryptionService *EncryptionService,
+	kubernetesService KubernetesService,
 ) *SecurityPolicyService {
 	return &SecurityPolicyService{
-		clusterManager:      clusterManager,
-		encryptionSvc:       encryptionSvc,
-		securityPolicyRepo:  securityPolicyRepo,
-		clusterRepo:         clusterRepo,
+		securityPolicyRepo: securityPolicyRepo,
+		clusterRepo:        clusterRepo,
+		clusterManager:     clusterManager,
+		encryptionService:  encryptionService,
+		kubernetesService:  kubernetesService,
 	}
 }
 
-func (s *SecurityPolicyService) GetSecurityPolicy(clusterID string) (*model.SecurityPolicy, error) {
-	policy, err := s.securityPolicyRepo.GetByClusterID(clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get security policy: %w", err)
-	}
-	return policy, nil
+// GetSecurityPolicy 获取集群的安全策略信息
+func (s *SecurityPolicyService) GetSecurityPolicy(ctx context.Context, clusterID string) (*model.SecurityPolicy, error) {
+	return s.securityPolicyRepo.GetByClusterID(ctx, clusterID)
 }
 
-func (s *SecurityPolicyService) SyncSecurityPolicyFromKubernetes(clusterID string) error {
+// SyncSecurityPolicyFromKubernetes 从Kubernetes集群同步安全策略信息
+func (s *SecurityPolicyService) SyncSecurityPolicyFromKubernetes(ctx context.Context, clusterID string) error {
+	// 获取集群kubeconfig
 	cluster, err := s.clusterRepo.GetByID(clusterID)
 	if err != nil {
 		return fmt.Errorf("failed to get cluster: %w", err)
 	}
 
-	kubeconfig, err := s.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	// 解密kubeconfig
+	kubeconfig, err := s.encryptionService.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt kubeconfig: %w", err)
 	}
 
-	ctx := context.Background()
-	clientset, err := s.clusterManager.GetClient(ctx, kubeconfig)
+	// 创建Kubernetes客户端
+	clientset, err := s.kubernetesService.GetClientset(kubeconfig)
 	if err != nil {
-		return fmt.Errorf("failed to get client: %w", err)
+		return fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
-	policy := &model.SecurityPolicy{
-		ClusterID: cluster.ID,
+	// 创建安全策略检测器
+	detector := NewSecurityPolicyDetector(clientset)
+
+	// 检测RBAC状态
+	rbacStatus, err := detector.DetectRBAC(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect RBAC status: %w", err)
 	}
 
-	// 检查Pod Security Policy
-	// 注意：PodSecurityPolicy在Kubernetes 1.25+中已被废弃
-	// 这里我们检查Pod Security Standard通过检查命名空间标签
-	policy.PodSecurityStandard = s.getPodSecurityStandard(ctx, clientset)
-
-	// 检查Network Policies
-	netpols, err := clientset.NetworkingV1().NetworkPolicies("").List(ctx, metav1.ListOptions{})
-	if err == nil {
-		policy.NetworkPoliciesEnabled = len(netpols.Items) > 0
-		policy.NetworkPoliciesCount = len(netpols.Items)
+	// 检测网络策略状态
+	networkPolicyStatus, err := detector.DetectNetworkPolicy(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect network policy status: %w", err)
 	}
 
-	// 检查RBAC
-	roles, err := clientset.RbacV1().Roles("").List(ctx, metav1.ListOptions{})
-	if err == nil {
-		policy.RBACEnabled = len(roles.Items) > 0
-		policy.RBACRolesCount = len(roles.Items)
+	// 检测Pod安全策略
+	podSecurityStatus, err := detector.DetectPodSecurity(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect pod security status: %w", err)
 	}
 
-	// 检查审计日志
-	// 这需要访问kube-apiserver配置，这里简化处理
-	policy.AuditLoggingEnabled = false
-	policy.AuditLoggingMode = "none"
+	// 检测审计日志状态
+	auditLoggingStatus, err := detector.DetectAuditLogging(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect audit logging status: %w", err)
+	}
 
-	if err := s.securityPolicyRepo.Upsert(policy); err != nil {
-		return fmt.Errorf("failed to upsert security policy: %w", err)
+	// 创建安全策略模型
+	securityPolicy := &model.SecurityPolicy{
+		ClusterID:              uuid.MustParse(clusterID),
+		PodSecurityStandard:    podSecurityStatus.Standard,
+		NetworkPoliciesEnabled: networkPolicyStatus.Enabled,
+		RBACEnabled:            rbacStatus.Enabled,
+		AuditLoggingEnabled:    auditLoggingStatus.Enabled,
+		// 添加新字段
+		RBACDetails:              rbacStatus.Details,
+		NetworkPolicyDetails:     networkPolicyStatus.Details,
+		PodSecurityDetails:       podSecurityStatus.Details,
+		AuditLoggingDetails:      auditLoggingStatus.Details,
+		NetworkPoliciesCount:     networkPolicyStatus.PoliciesCount,
+		RBACRolesCount:           rbacStatus.RolesCount,
+		CNIPlugin:                networkPolicyStatus.CNIPlugin,
+		PodSecurityAdmissionMode: podSecurityStatus.AdmissionMode,
+	}
+
+	// 保存到数据库
+	if err := s.securityPolicyRepo.Upsert(ctx, securityPolicy); err != nil {
+		return fmt.Errorf("failed to save security policy: %w", err)
 	}
 
 	return nil
-}
-
-func (s *SecurityPolicyService) getPodSecurityStandard(ctx context.Context, clientset *kubernetes.Clientset) string {
-	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return "baseline"
-	}
-
-	// 检查是否有PSS标签
-	for _, ns := range namespaces.Items {
-		if pss, ok := ns.Labels["pod-security.kubernetes.io/enforce"]; ok {
-			return pss
-		}
-	}
-
-	return "baseline"
 }

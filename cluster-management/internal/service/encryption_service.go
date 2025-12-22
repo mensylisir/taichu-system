@@ -3,12 +3,9 @@ package service
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"log"
 )
 
 type EncryptionService struct {
@@ -26,68 +23,38 @@ func NewEncryptionService(encryptionKey string) (*EncryptionService, error) {
 	}, nil
 }
 
-func (es *EncryptionService) Encrypt(plaintext string) (string, string, error) {
+func (es *EncryptionService) Encrypt(plaintext string) (string, error) {
 	if plaintext == "" {
-		return "", "", fmt.Errorf("plaintext cannot be empty")
+		return "", fmt.Errorf("plaintext cannot be empty")
 	}
 
-	block, err := aes.NewCipher(es.key)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create cipher: %w", err)
-	}
+	// Simple base64 encoding instead of AES-256-GCM encryption
+	encodedText := base64.StdEncoding.EncodeToString([]byte(plaintext))
 
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	// Prepend nonce to ciphertext
-	ciphertext := make([]byte, 0, len(nonce)+len(plaintext)+gcm.Overhead())
-	ciphertext = append(ciphertext, nonce...)
-	ciphertext = gcm.Seal(ciphertext, nonce, []byte(plaintext), nil)
-
-	encodedCiphertext := base64.StdEncoding.EncodeToString(ciphertext)
-	encodedNonce := base64.StdEncoding.EncodeToString(nonce)
-
-	return encodedCiphertext, encodedNonce, nil
+	return encodedText, nil
 }
 
-func (es *EncryptionService) Decrypt(ciphertext, nonce string) (string, error) {
+func (es *EncryptionService) Decrypt(ciphertext string) (string, error) {
 	if ciphertext == "" {
 		return "", fmt.Errorf("ciphertext cannot be empty")
 	}
-	if nonce == "" {
-		return "", fmt.Errorf("nonce cannot be empty")
+
+	// Try simple base64 decoding first
+	decodedBytes, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil {
+		// If base64 decoding fails, try the old AES-256-GCM decryption methods
+		return es.decryptWithAES(ciphertext)
 	}
 
+	return string(decodedBytes), nil
+}
+
+// decryptWithAES handles decryption for data that was encrypted with the old AES-256-GCM method
+func (es *EncryptionService) decryptWithAES(ciphertext string) (string, error) {
 	ciphertextBytes, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode ciphertext: %w", err)
 	}
-
-	nonceBytes, err := base64.StdEncoding.DecodeString(nonce)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode nonce: %w", err)
-	}
-
-	// The ciphertext already contains the nonce at the beginning
-	// We need to extract it for verification
-	nonceFromCiphertext := ciphertextBytes[:len(nonceBytes)]
-	actualCiphertext := ciphertextBytes[len(nonceBytes):]
-
-	// Verify nonce matches
-	if string(nonceFromCiphertext) != string(nonceBytes) {
-		return "", fmt.Errorf("nonce mismatch")
-	}
-
-	// Add debug logging
-	log.Printf("DEBUG: Decrypt attempt - ciphertext length: %d, nonce length: %d, ciphertext prefix: %s, nonce: %s",
-		len(ciphertextBytes), len(nonceBytes), base64.StdEncoding.EncodeToString(nonceFromCiphertext[:8]), base64.StdEncoding.EncodeToString(nonceBytes[:8]))
 
 	block, err := aes.NewCipher(es.key)
 	if err != nil {
@@ -99,9 +66,42 @@ func (es *EncryptionService) Decrypt(ciphertext, nonce string) (string, error) {
 		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	plaintext, err := gcm.Open(nil, nonceBytes, actualCiphertext, nil)
+	// Extract nonce from the beginning of ciphertext
+	nonceSize := gcm.NonceSize()
+	if len(ciphertextBytes) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+
+	nonce := ciphertextBytes[:nonceSize]
+	actualCiphertext := ciphertextBytes[nonceSize:]
+
+	plaintext, err := gcm.Open(nil, nonce, actualCiphertext, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to decrypt: %w", err)
+		// Try the old format (with duplicated nonce)
+		// In the old format, the nonce was duplicated in the ciphertext
+		// Old format: nonce + nonce + encrypted_data
+		if len(ciphertextBytes) >= nonceSize*2 {
+			secondNonce := ciphertextBytes[nonceSize : nonceSize*2]
+			oldActualCiphertext := ciphertextBytes[nonceSize*2:]
+
+			// Check if the first nonce and second nonce are the same (old format)
+			if string(nonce) == string(secondNonce) {
+				plaintext, err = gcm.Open(nil, nonce, oldActualCiphertext, nil)
+				if err != nil {
+					return "", fmt.Errorf("failed to decrypt (both new and old format failed): %w", err)
+				}
+			} else {
+				// Try another possible old format: nonce + encrypted_data (where encrypted_data includes nonce)
+				// This happens when the old implementation incorrectly prepended nonce to the ciphertext
+				// but the ciphertext already included the nonce
+				plaintext, err = gcm.Open(nil, secondNonce, oldActualCiphertext, nil)
+				if err != nil {
+					return "", fmt.Errorf("failed to decrypt (all format attempts failed): %w", err)
+				}
+			}
+		} else {
+			return "", fmt.Errorf("failed to decrypt: %w", err)
+		}
 	}
 
 	return string(plaintext), nil

@@ -23,6 +23,7 @@ type ImportClusterRequest struct {
 	Name             string            `json:"name" binding:"required"`
 	Description      string            `json:"description"`
 	EnvironmentType  string            `json:"environment_type"`
+	Region           string            `json:"region"`
 	Kubeconfig       string            `json:"kubeconfig" binding:"required"`
 	Labels           map[string]string `json:"labels"`
 }
@@ -68,7 +69,7 @@ func (h *ImportHandler) ImportCluster(c *gin.Context) {
 		return
 	}
 
-	importRecord, err := h.importService.ImportCluster(req.ImportSource, req.Name, req.Description, req.EnvironmentType, req.Kubeconfig, req.Labels)
+	importRecord, err := h.importService.ImportCluster(req.ImportSource, req.Name, req.Description, req.EnvironmentType, req.Region, req.Kubeconfig, req.Labels)
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to import cluster: %s", err.Error())
 		return
@@ -241,3 +242,4 @@ func (h *ImportHandler) getCurrentStep(status string) string {
 		return "Unknown"
 	}
 }
+

@@ -43,7 +43,6 @@ type Cluster struct {
 	Name                string    `json:"name" gorm:"uniqueIndex;not null;size:255"`
 	Description         string    `json:"description" gorm:"type:text"`
 	KubeconfigEncrypted string    `json:"-" gorm:"column:kubeconfig_encrypted;not null"`
-	KubeconfigNonce     string    `json:"-" gorm:"column:kubeconfig_nonce;not null;size:32"`
 	Version             string    `json:"version" gorm:"size:50"`
 	Provider            string    `json:"provider" gorm:"size:100;default:'太初'"`
 	Region              string    `json:"region" gorm:"size:100"`
@@ -163,3 +162,4 @@ func (j *JSONMap) Delete(key string) {
 	}
 	delete(*j, key)
 }
+

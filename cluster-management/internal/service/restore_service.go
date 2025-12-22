@@ -104,10 +104,7 @@ func (s *RestoreService) GetRestoreProgress(restoreID string) (*RestoreProgress,
 // executeRestore 执行实际的恢复操作
 func (s *RestoreService) executeRestore(restoreID string, cluster *model.Cluster, backup *model.ClusterBackup, restoreName string) {
 	// 解密kubeconfig
-	kubeconfig, err := s.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	kubeconfig, err := s.encryptionSvc.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		s.logRestoreError(restoreID, fmt.Errorf("failed to decrypt kubeconfig: %w", err))
 		return
@@ -313,3 +310,4 @@ func (s *RestoreService) logRestoreSuccess(restoreID string) {
 	// 记录恢复成功
 	fmt.Printf("Restore %s completed successfully\n", restoreID)
 }
+

@@ -75,10 +75,7 @@ func (s *EventService) SyncEventsFromKubernetes(clusterID string) error {
 		return fmt.Errorf("failed to get cluster: %w", err)
 	}
 
-	kubeconfig, err := s.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	kubeconfig, err := s.encryptionSvc.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt kubeconfig: %w", err)
 	}
@@ -132,3 +129,4 @@ func (s *EventService) determineSeverity(eventType, reason string) string {
 		return "info"
 	}
 }
+

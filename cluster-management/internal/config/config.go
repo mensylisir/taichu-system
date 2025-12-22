@@ -1,18 +1,19 @@
 package config
 
 import (
-	"github.com/spf13/viper"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Server        ServerConfig        `mapstructure:"server"`
-	Database      DatabaseConfig      `mapstructure:"database"`
-	Encryption    EncryptionConfig    `mapstructure:"encryption"`
+	Server         ServerConfig         `mapstructure:"server"`
+	Database       DatabaseConfig       `mapstructure:"database"`
+	Encryption     EncryptionConfig     `mapstructure:"encryption"`
 	ClusterManager ClusterManagerConfig `mapstructure:"cluster_manager"`
-	Worker        WorkerConfig        `mapstructure:"worker"`
-	Logging       LoggingConfig       `mapstructure:"logging"`
-	Kubernetes    KubernetesConfig    `mapstructure:"kubernetes"`
+	Worker         WorkerConfig         `mapstructure:"worker"`
+	Logging        LoggingConfig        `mapstructure:"logging"`
+	Kubernetes     KubernetesConfig     `mapstructure:"kubernetes"`
 }
 
 type ServerConfig struct {
@@ -23,25 +24,25 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Host         string        `mapstructure:"host"`
-	Port         int           `mapstructure:"port"`
-	Username     string        `mapstructure:"username"`
-	Password     string        `mapstructure:"password"`
-	DBName       string        `mapstructure:"dbname"`
-	SSLMode      string        `mapstructure:"sslmode"`
-	Charset      string        `mapstructure:"charset"`
-	Options      string        `mapstructure:"options"`
-	Timezone     string        `mapstructure:"timezone"`
-	MaxIdleConns int           `mapstructure:"max_idle_conns"`
-	MaxOpenConns int           `mapstructure:"max_open_conns"`
+	Host            string        `mapstructure:"host"`
+	Port            int           `mapstructure:"port"`
+	Username        string        `mapstructure:"username"`
+	Password        string        `mapstructure:"password"`
+	DBName          string        `mapstructure:"dbname"`
+	SSLMode         string        `mapstructure:"sslmode"`
+	Charset         string        `mapstructure:"charset"`
+	Options         string        `mapstructure:"options"`
+	Timezone        string        `mapstructure:"timezone"`
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
-	AutoMigrate  bool          `mapstructure:"auto_migrate"`
-	AutoCreateDB bool          `mapstructure:"auto_create_db"`
+	AutoMigrate     bool          `mapstructure:"auto_migrate"`
+	AutoCreateDB    bool          `mapstructure:"auto_create_db"`
 }
 
 type EncryptionConfig struct {
-	Key        string `mapstructure:"key"`
-	Algorithm  string `mapstructure:"algorithm"`
+	Key       string `mapstructure:"key"`
+	Algorithm string `mapstructure:"algorithm"`
 }
 
 type ClusterManagerConfig struct {
@@ -56,6 +57,7 @@ type WorkerConfig struct {
 	MaxConcurrency  int           `mapstructure:"max_concurrency"`
 	RetryAttempts   int           `mapstructure:"retry_attempts"`
 	RetryDelay      time.Duration `mapstructure:"retry_delay"`
+	UseInformerMode bool          `mapstructure:"use_informer_mode"`
 }
 
 type LoggingConfig struct {

@@ -143,7 +143,7 @@ func (h *ClusterHandler) CreateCluster(c *gin.Context) {
 	}
 
 	// 加密kubeconfig
-	encryptedKubeconfig, nonce, err := h.encryptionService.Encrypt(req.Kubeconfig)
+	encryptedKubeconfig, err := h.encryptionService.Encrypt(req.Kubeconfig)
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to encrypt kubeconfig: %v", err)
 		return
@@ -157,7 +157,6 @@ func (h *ClusterHandler) CreateCluster(c *gin.Context) {
 		Name:                req.Name,
 		Description:         req.Description,
 		KubeconfigEncrypted: encryptedKubeconfig,
-		KubeconfigNonce:     nonce,
 		Labels:              labels,
 		Provider:            "太初",
 		Region:              "default",
@@ -603,3 +602,4 @@ func getTimeString(t *time.Time) string {
 	}
 	return t.Format(time.RFC3339)
 }
+

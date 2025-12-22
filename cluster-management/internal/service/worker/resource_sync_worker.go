@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -123,10 +124,7 @@ func (w *ResourceSyncWorker) syncClusterData(cluster model.Cluster) {
 	w.sem <- struct{}{}
 	defer func() { <-w.sem }()
 
-	kubeconfig, err := w.encryptionSvc.Decrypt(
-		cluster.KubeconfigEncrypted,
-		cluster.KubeconfigNonce,
-	)
+	kubeconfig, err := w.encryptionSvc.Decrypt(cluster.KubeconfigEncrypted)
 	if err != nil {
 		log.Printf("Failed to decrypt kubeconfig for cluster %s: %v", cluster.Name, err)
 		return
@@ -147,17 +145,20 @@ func (w *ResourceSyncWorker) syncClusterData(cluster model.Cluster) {
 	// 同步事件信息
 	w.syncEvents(ctx, clientset, cluster.ID)
 
-	// 同步集群资源使用情况
-	w.syncClusterResources(ctx, clientset, cluster.ID)
+	// 同步集群资源使用情况并获取节点信息
+	nodes := w.syncClusterResources(ctx, clientset, cluster.ID)
 
 	// 同步自动扩缩容策略
 	w.syncAutoscalingPolicies(ctx, clientset, cluster.ID)
 
 	// 同步安全策略
-	w.syncSecurityPolicies(ctx, clientset, cluster.ID)
+	if err := w.syncSecurityPolicies(ctx, clientset, cluster.ID.String()); err != nil {
+		log.Printf("Failed to sync security policies: %v", err)
+	}
 
 	// 更新 cluster_state 中的 APIServerURL
-	w.updateAPIServerURL(ctx, clientset, cluster.ID)
+	// 传递已获取的节点信息，避免重复API调用
+	w.updateAPIServerURL(ctx, nodes, cluster.ID)
 
 	log.Printf("Resource sync completed for cluster %s", cluster.Name)
 }
@@ -306,12 +307,12 @@ func (w *ResourceSyncWorker) syncEvents(ctx context.Context, clientset *kubernet
 	log.Printf("Synced %d events for cluster %s", len(recentEvents), clusterID)
 }
 
-func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset *kubernetes.Clientset, clusterID uuid.UUID) {
+func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset *kubernetes.Clientset, clusterID uuid.UUID) []corev1.Node {
 	// 获取节点信息以计算资源使用情况
 	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list nodes for resource sync: %v", err)
-		return
+		return nil
 	}
 
 	var totalCPUCores int
@@ -334,7 +335,7 @@ func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset
 	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list pods for resource sync: %v", err)
-		return
+		return nil
 	}
 
 	var usedCPUCores float64
@@ -409,6 +410,9 @@ func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset
 	}
 
 	log.Printf("Synced cluster resources for cluster %s", clusterID)
+
+	// 返回节点列表，供其他函数使用
+	return nodes.Items
 }
 
 func (w *ResourceSyncWorker) getNodeStatus(node corev1.Node) string {
@@ -428,12 +432,12 @@ func (w *ResourceSyncWorker) getNodeType(node corev1.Node) string {
 	if _, hasMasterLabel := node.Labels["node-role.kubernetes.io/master"]; hasMasterLabel {
 		return "control-plane"
 	}
-	
+
 	// 检查是否有control-plane角色标签
 	if _, hasControlPlaneLabel := node.Labels["node-role.kubernetes.io/control-plane"]; hasControlPlaneLabel {
 		return "control-plane"
 	}
-	
+
 	// 默认返回worker
 	return "worker"
 }
@@ -493,7 +497,7 @@ func (w *ResourceSyncWorker) syncAutoscalingPolicies(ctx context.Context, client
 	// 创建或更新自动扩缩容策略
 	policy := &model.AutoscalingPolicy{
 		ID:                       uuid.New(),
-		ClusterID:               clusterID,
+		ClusterID:                clusterID,
 		Enabled:                  len(hpaList.Items) > 0 || clusterAutoscalerEnabled,
 		HPACount:                 len(hpaList.Items),
 		ClusterAutoscalerEnabled: clusterAutoscalerEnabled,
@@ -524,89 +528,77 @@ func (w *ResourceSyncWorker) syncAutoscalingPolicies(ctx context.Context, client
 }
 
 // syncSecurityPolicies 同步安全策略
-func (w *ResourceSyncWorker) syncSecurityPolicies(ctx context.Context, clientset *kubernetes.Clientset, clusterID uuid.UUID) {
-	log.Printf("Syncing security policies for cluster %s", clusterID)
+func (w *ResourceSyncWorker) syncSecurityPolicies(ctx context.Context, clientset *kubernetes.Clientset, clusterID string) error {
+	// 创建安全策略检测器
+	detector := service.NewSecurityPolicyDetector(clientset)
 
-	// 获取NetworkPolicy数量
-	networkPolicies, err := clientset.NetworkingV1().NetworkPolicies("").List(ctx, metav1.ListOptions{})
+	// 检测RBAC状态
+	rbacStatus, err := detector.DetectRBAC(ctx)
 	if err != nil {
-		log.Printf("Failed to list NetworkPolicies: %v", err)
-		return
+		return fmt.Errorf("failed to detect RBAC status: %w", err)
 	}
 
-	// 获取RBAC角色数量
-	roles, err := clientset.RbacV1().Roles("").List(ctx, metav1.ListOptions{})
+	// 检测网络策略状态
+	networkPolicyStatus, err := detector.DetectNetworkPolicy(ctx)
 	if err != nil {
-		log.Printf("Failed to list Roles: %v", err)
-		return
+		return fmt.Errorf("failed to detect network policy status: %w", err)
 	}
 
-	clusterRoles, err := clientset.RbacV1().ClusterRoles().List(ctx, metav1.ListOptions{})
+	// 检测Pod安全策略
+	podSecurityStatus, err := detector.DetectPodSecurity(ctx)
 	if err != nil {
-		log.Printf("Failed to list ClusterRoles: %v", err)
-		return
+		return fmt.Errorf("failed to detect pod security status: %w", err)
 	}
 
-	// 检查PodSecurity标准（简化处理，实际应该检查PodSecurityAdmission配置）
-	podSecurityStandard := "baseline" // 默认值
-
-	// 检查审计日志是否启用（简化处理，实际应该检查审计策略配置）
-	auditLoggingEnabled := false
-	auditLoggingMode := "none"
-	
-	// 尝试获取audit-policy配置文件，这里简化处理
-	_, err = clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "audit-policy", metav1.GetOptions{})
-	if err == nil {
-		auditLoggingEnabled = true
-		auditLoggingMode = "metadata" // 简化处理
+	// 检测审计日志状态
+	auditLoggingStatus, err := detector.DetectAuditLogging(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect audit logging status: %w", err)
 	}
 
-	// 创建或更新安全策略
-	policy := &model.SecurityPolicy{
-		ID:                      uuid.New(),
-		ClusterID:              clusterID,
-		PodSecurityStandard:    podSecurityStandard,
-		NetworkPoliciesEnabled: len(networkPolicies.Items) > 0,
-		NetworkPoliciesCount:   len(networkPolicies.Items),
-		RBACEnabled:            true, // Kubernetes默认启用RBAC
-		RBACRolesCount:         len(roles.Items) + len(clusterRoles.Items),
-		AuditLoggingEnabled:    auditLoggingEnabled,
-		AuditLoggingMode:       auditLoggingMode,
+	// 创建安全策略模型
+	securityPolicy := &model.SecurityPolicy{
+		ID:                     uuid.New(), // 生成新的 UUID
+		ClusterID:              uuid.MustParse(clusterID),
+		PodSecurityStandard:    podSecurityStatus.Standard,
+		NetworkPoliciesEnabled: networkPolicyStatus.Enabled,
+		RBACEnabled:            rbacStatus.Enabled,
+		AuditLoggingEnabled:    auditLoggingStatus.Enabled,
+		// 添加新字段
+		RBACDetails:              rbacStatus.Details,
+		NetworkPolicyDetails:     networkPolicyStatus.Details,
+		PodSecurityDetails:       podSecurityStatus.Details,
+		AuditLoggingDetails:      auditLoggingStatus.Details,
+		NetworkPoliciesCount:     networkPolicyStatus.PoliciesCount,
+		RBACRolesCount:           rbacStatus.RolesCount,
+		CNIPlugin:                networkPolicyStatus.CNIPlugin,
+		PodSecurityAdmissionMode: podSecurityStatus.AdmissionMode,
 	}
 
-	// 使用Upsert方法创建或更新策略
-	if err := w.securityPolicyRepo.Upsert(policy); err != nil {
-		log.Printf("Failed to upsert security policy: %v", err)
+	// 保存到数据库
+	if err := w.securityPolicyRepo.Upsert(ctx, securityPolicy); err != nil {
+		return fmt.Errorf("failed to save security policy: %w", err)
 	}
 
-	log.Printf("Synced security policies for cluster %s", clusterID)
+	return nil
 }
 
 // calculateUsedStorageBytes 计算集群中已使用的存储字节数
 func calculateUsedStorageBytes(clientset *kubernetes.Clientset, ctx context.Context) int64 {
 	var totalUsedStorageBytes int64
 
-	// 获取所有命名空间
-	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	// 使用更高效的方法获取所有PVC，避免遍历每个命名空间
+	pvcs, err := clientset.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
 	if err != nil {
-		log.Printf("Failed to list namespaces: %v", err)
+		log.Printf("Failed to list PVCs: %v", err)
 		return 0
 	}
 
-	// 遍历每个命名空间，统计PVC的使用情况
-	for _, ns := range namespaces.Items {
-		pvcs, err := clientset.CoreV1().PersistentVolumeClaims(ns.Name).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			log.Printf("Failed to list PVCs in namespace %s: %v", ns.Name, err)
-			continue
-		}
-
-		for _, pvc := range pvcs.Items {
-			// 如果PVC已绑定到PV，获取已使用空间
-			if pvc.Status.Phase == corev1.ClaimBound && pvc.Status.Capacity != nil {
-				if storage, ok := pvc.Status.Capacity[corev1.ResourceStorage]; ok {
-					totalUsedStorageBytes += storage.Value()
-				}
+	for _, pvc := range pvcs.Items {
+		// 如果PVC已绑定到PV，获取已使用空间
+		if pvc.Status.Phase == corev1.ClaimBound && pvc.Status.Capacity != nil {
+			if storage, ok := pvc.Status.Capacity[corev1.ResourceStorage]; ok {
+				totalUsedStorageBytes += storage.Value()
 			}
 		}
 	}
@@ -615,28 +607,23 @@ func calculateUsedStorageBytes(clientset *kubernetes.Clientset, ctx context.Cont
 }
 
 // updateAPIServerURL 更新 cluster_state 中的 APIServerURL
-func (w *ResourceSyncWorker) updateAPIServerURL(ctx context.Context, clientset *kubernetes.Clientset, clusterID uuid.UUID) {
-	// 获取 APIServer URL（通过配置获取）
-	config, err := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "kube-apiserver-original", metav1.GetOptions{})
+func (w *ResourceSyncWorker) updateAPIServerURL(ctx context.Context, nodes []corev1.Node, clusterID uuid.UUID) {
 	var apiServerURL string
-	if err == nil {
-		if url, ok := config.Data["api-server-url"]; ok {
-			apiServerURL = url
-		}
-	}
 
-	// 如果没有找到，尝试从节点信息推断
-	if apiServerURL == "" {
-		nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-		if err == nil && len(nodes.Items) > 0 {
-			// 使用第一个节点的 IP 作为 APIServer URL
-			apiServerURL = "https://" + nodes.Items[0].Status.Addresses[0].Address + ":6443"
+	// 使用传入的节点信息推断，避免额外的API调用
+	if len(nodes) > 0 {
+		// 使用第一个节点的 IP 作为 APIServer URL
+		for _, address := range nodes[0].Status.Addresses {
+			if address.Type == corev1.NodeInternalIP {
+				apiServerURL = "https://" + address.Address + ":6443"
+				break
+			}
 		}
 	}
 
 	// 使用数据库事务更新 cluster_state 表中的 APIServerURL
 	// 确保API服务器URL更新是原子的，不与其他Worker的更新冲突
-	err = w.clusterStateRepo.GetDB().Transaction(func(tx *gorm.DB) error {
+	err := w.clusterStateRepo.GetDB().Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.ClusterState{}).Where("cluster_id = ?", clusterID.String()).Updates(map[string]interface{}{
 			"api_server_url": apiServerURL,
 			"updated_at":     time.Now(),
