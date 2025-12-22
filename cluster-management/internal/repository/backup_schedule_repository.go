@@ -44,3 +44,11 @@ func (r *BackupScheduleRepository) Delete(id string) error {
 func (r *BackupScheduleRepository) DeleteByClusterID(clusterID string) error {
 	return r.db.Where("cluster_id = ?", clusterID).Delete(&model.BackupSchedule{}).Error
 }
+
+func (r *BackupScheduleRepository) ListEnabled() ([]*model.BackupSchedule, error) {
+	var schedules []*model.BackupSchedule
+	if err := r.db.Where("enabled = ?", true).Order("created_at DESC").Find(&schedules).Error; err != nil {
+		return nil, err
+	}
+	return schedules, nil
+}

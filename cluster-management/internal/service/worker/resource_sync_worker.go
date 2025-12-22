@@ -209,10 +209,29 @@ func (w *ResourceSyncWorker) syncNodes(ctx context.Context, clientset *kubernete
 			node.ID = existingNode.ID
 		}
 
-		// 设置资源信息
-		if allocatable := k8sNode.Status.Allocatable; allocatable != nil {
-			node.CPUCores = int(allocatable.Cpu().MilliValue() / 1000)
-			node.MemoryBytes = allocatable.Memory().Value()
+		// 设置资源信息（显示逻辑CPU数）
+		if capacity := k8sNode.Status.Capacity; capacity != nil {
+			logicalCPU := int(capacity.Cpu().MilliValue() / 1000)
+			node.CPUCores = logicalCPU // 显示逻辑CPU数
+			node.MemoryBytes = capacity.Memory().Value()
+			log.Printf("[NODE-SYNC] Node %s: Logical CPU=%d, Memory=%d bytes",
+				nodeName, node.CPUCores, node.MemoryBytes)
+		}
+
+		// 统计Pod数量
+		log.Printf("[NODE-SYNC] Counting pods for node: %s", nodeName)
+		pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+			FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
+		})
+		if err != nil {
+			log.Printf("[NODE-SYNC] Error listing pods for node %s: %v", nodeName, err)
+			node.PodCount = 0
+		} else {
+			node.PodCount = len(pods.Items)
+			log.Printf("[NODE-SYNC] Found %d pods for node %s", node.PodCount, nodeName)
+			for _, pod := range pods.Items {
+				log.Printf("[NODE-SYNC] Pod: %s/%s (status: %s)", pod.Namespace, pod.Name, pod.Status.Phase)
+			}
 		}
 
 		// 使用UpsertSingle方法创建或更新节点
@@ -320,13 +339,11 @@ func (w *ResourceSyncWorker) syncClusterResources(ctx context.Context, clientset
 	var totalStorageBytes int64
 
 	for _, node := range nodes.Items {
-		if allocatable := node.Status.Allocatable; allocatable != nil {
-			totalCPUCores += int(allocatable.Cpu().MilliValue() / 1000)
-			totalMemoryBytes += allocatable.Memory().Value()
-			if capacity := node.Status.Capacity; capacity != nil {
-				if storage, ok := capacity["ephemeral-storage"]; ok {
-					totalStorageBytes += storage.Value()
-				}
+		if capacity := node.Status.Capacity; capacity != nil {
+			totalCPUCores += int(capacity.Cpu().MilliValue() / 1000)
+			totalMemoryBytes += capacity.Memory().Value()
+			if storage, ok := capacity["ephemeral-storage"]; ok {
+				totalStorageBytes += storage.Value()
 			}
 		}
 	}

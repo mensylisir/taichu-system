@@ -459,6 +459,13 @@ func setupRoutes(
 				autoscaling.GET("", autoscalingPolicyHandler.GetAutoscalingPolicy)
 			}
 
+			// etcd配置相关接口
+			etcd := clusters.Group(":id/etcd")
+			{
+				etcd.POST("config", backupHandler.RegisterEtcdConfig)
+				etcd.GET("config", backupHandler.GetEtcdConfig)
+			}
+
 			// 备份相关接口
 			backups := clusters.Group(":id/backups")
 			{
@@ -470,10 +477,29 @@ func setupRoutes(
 				backups.DELETE(":backupId", backupHandler.DeleteBackup)
 			}
 
+			// 独立的etcd备份接口
+			etcdBackups := clusters.Group(":id/etcd/backups")
+			{
+				etcdBackups.POST("", backupHandler.CreateEtcdBackup)
+				etcdBackups.GET("", backupHandler.ListBackups)
+				etcdBackups.GET(":backupId", backupHandler.GetBackup)
+			}
+
+			// 独立的资源备份接口
+			resourceBackups := clusters.Group(":id/resources/backups")
+			{
+				resourceBackups.POST("", backupHandler.CreateResourceBackup)
+				resourceBackups.GET("", backupHandler.ListBackups)
+				resourceBackups.GET(":backupId", backupHandler.GetBackup)
+			}
+
 			// 备份计划接口
 			backupSchedules := clusters.Group(":id/backup-schedules")
 			{
 				backupSchedules.GET("", backupHandler.ListBackupSchedules)
+				backupSchedules.POST("", backupHandler.CreateBackupSchedule)
+				backupSchedules.PUT(":scheduleId", backupHandler.UpdateBackupSchedule)
+				backupSchedules.DELETE(":scheduleId", backupHandler.DeleteBackupSchedule)
 			}
 
 			// 审计相关接口

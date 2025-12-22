@@ -1,6 +1,6 @@
 # 服务器配置
 server:
-  port: "8081"
+  port: "8086"
   mode: "release"
   read_timeout: 60s
   write_timeout: 60s

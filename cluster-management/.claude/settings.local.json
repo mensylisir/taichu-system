@@ -39,7 +39,17 @@
       "Bash(cmd /c:*)",
       "Bash(powershell:*)",
       "Bash(kubectl:*)",
-      "Bash(docker build:*)"
+      "Bash(docker build:*)",
+      "Bash(timeout:*)",
+      "Bash(tee:*)",
+      "Bash(PGPASSWORD=Def@u1tpwd psql:*)",
+      "Bash(sshpass -p:*)",
+      "Bash(\"\\\\backups\\\\5d1f1f48-2ef7-429c-9488-5d37a02b4e77\\\\test-full-backup-fixed\\\\20251222-145823.tar.gz\" )",
+      "Bash(\"\\\\backups\\\\5d1f1f48-2ef7-429c-9488-5d37a02b4e77\\\\test-resource-backup\\\\20251222-150011.tar.gz\")",
+      "Bash(CLUSTER_ID=\"5d1f1f48-2ef7-429c-9488-5d37a02b4e77\")",
+      "Bash(BACKUP_NAME=\"test-etcd-backup-debug\")",
+      "Bash(BACKUP_NAME=\"test-etcd-backup-fixed\")",
+      "Bash(BACKUP_NAME=\"test-etcd-backup-final\")"
     ]
   }
 }

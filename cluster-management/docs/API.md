@@ -4,7 +4,7 @@
 
 太初集群管理系统是一个基于Go语言开发的Kubernetes集群管理平台，提供集群生命周期管理、监控、备份、扩展等功能。
 
-**基础URL**: `http://localhost:8081/api/v1`
+**基础URL**: `http://localhost:8086/api/v1`
 
 **认证方式**: JWT Bearer Token
 - 在需要认证的接口请求头中添加: `Authorization: Bearer <token>`
@@ -55,11 +55,9 @@
   "message": "success",
   "data": {
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "expires_in": 86400,
     "user": {
       "id": "550e8400-e29b-41d4-a716-446655440000",
       "username": "admin",
-      "email": "admin@example.com",
       "role": "admin"
     }
   }
@@ -72,30 +70,14 @@
 
 **接口地址**: `POST /api/v1/auth/register`
 
-**描述**: 注册新用户
+**描述**: 用户注册
 
 **请求体**:
 ```json
 {
   "username": "string",
-  "email": "string",
   "password": "string",
-  "role": "string"
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "username": "newuser",
-    "email": "newuser@example.com",
-    "role": "user",
-    "created_at": "2025-01-01T00:00:00Z"
-  }
+  "email": "string"
 }
 ```
 
@@ -110,7 +92,7 @@
 **请求体**:
 ```json
 {
-  "token": "string"
+  "refresh_token": "string"
 }
 ```
 
@@ -150,7 +132,7 @@
 
 **接口地址**: `GET /api/v1/auth/token`
 
-**描述**: 生成测试用JWT令牌（仅开发环境使用）
+**描述**: 生成测试用令牌（无需认证，仅用于开发测试）
 
 **响应示例**:
 ```json
@@ -167,25 +149,11 @@
 
 ## 集群接口
 
-### 创建集群
+### 获取集群拓扑
 
-**接口地址**: `POST /api/v1/clusters`
+**接口地址**: `GET /api/v1/clusters/topology`
 
 **认证**: 需要JWT令牌
-
-**描述**: 通过kubeconfig创建集群
-
-**请求体**:
-```json
-{
-  "name": "string",
-  "description": "string",
-  "kubeconfig": "string",
-  "labels": {
-    "key": "value"
-  }
-}
-```
 
 **响应示例**:
 ```json
@@ -193,12 +161,36 @@
   "code": 0,
   "message": "success",
   "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "my-cluster",
-    "description": "My Kubernetes cluster",
-    "status": "unknown",
-    "created_at": "2025-01-01T00:00:00Z"
+    "clusters": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "cluster1",
+        "status": "healthy",
+        "node_count": 3,
+        "version": "v1.24.9"
+      }
+    ]
   }
+}
+```
+
+---
+
+### 创建集群
+
+**接口地址**: `POST /api/v1/clusters`
+
+**认证**: 需要JWT令牌
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string",
+  "provider": "string",
+  "region": "string",
+  "version": "string",
+  "node_count": 3
 }
 ```
 
@@ -210,46 +202,12 @@
 
 **认证**: 需要JWT令牌
 
-**描述**: 通过预定义机器列表创建集群
-
 **请求体**:
 ```json
 {
   "cluster_name": "string",
-  "description": "string",
-  "machine_ids": ["uuid1", "uuid2"],
-  "kubernetes": {
-    "version": "string",
-    "image_repo": "string",
-    "container_manager": "string"
-  },
-  "network": {
-    "plugin": "string",
-    "pods_cidr": "string",
-    "service_cidr": "string"
-  },
-  "artifact_path": "string",
-  "with_packages": true,
-  "auto_approve": true,
-  "labels": {
-    "key": "value"
-  }
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "cluster_name": "my-cluster",
-    "status": "pending",
-    "progress": 0,
-    "current_step": "Initializing",
-    "created_at": "2025-01-01T00:00:00Z"
-  }
+  "machine_ids": ["id1", "id2", "id3"],
+  "kubernetes_version": "v1.24.9"
 }
 ```
 
@@ -262,11 +220,9 @@
 **认证**: 需要JWT令牌
 
 **查询参数**:
-- `page`: 页码（默认1）
-- `limit`: 每页数量（默认20，最大100）
-- `status`: 集群状态过滤
-- `label_selector`: 标签选择器
-- `search`: 搜索关键词
+- `status`: 集群状态
+- `page`: 页码
+- `limit`: 每页数量
 
 **响应示例**:
 ```json
@@ -277,24 +233,16 @@
     "clusters": [
       {
         "id": "550e8400-e29b-41d4-a716-446655440000",
-        "name": "my-cluster",
-        "description": "My Kubernetes cluster",
+        "name": "cluster1",
         "status": "healthy",
         "provider": "太初",
-        "region": "default",
-        "version": "v1.28.0",
-        "kubernetes_version": "v1.28.0",
+        "region": "cn-east-1",
+        "version": "v1.24.9",
         "node_count": 3,
-        "labels": {
-          "env": "production"
-        },
-        "created_at": "2025-01-01T00:00:00Z",
-        "updated_at": "2025-01-01T00:00:00Z"
+        "created_at": "2025-01-01T00:00:00Z"
       }
     ],
-    "total": 1,
-    "page": 1,
-    "limit": 20
+    "total": 1
   }
 }
 ```
@@ -310,37 +258,6 @@
 **路径参数**:
 - `id`: 集群ID
 
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "my-cluster",
-    "description": "My Kubernetes cluster",
-    "provider": "太初",
-    "region": "default",
-    "status": "healthy",
-    "version": "v1.28.0",
-    "labels": {
-      "env": "production"
-    },
-    "node_count": 3,
-    "total_cpu_cores": 12,
-    "total_memory_bytes": 51539607552,
-    "total_storage_bytes": 107374182400,
-    "used_storage_bytes": 21474836480,
-    "storage_usage_percent": 20.0,
-    "kubernetes_version": "v1.28.0",
-    "api_server_url": "https://172.30.1.12:6443",
-    "last_heartbeat_at": "2025-01-01T00:00:00Z",
-    "created_at": "2025-01-01T00:00:00Z",
-    "updated_at": "2025-01-01T00:00:00Z"
-  }
-}
-```
-
 ---
 
 ### 删除集群
@@ -352,17 +269,6 @@
 **路径参数**:
 - `id`: 集群ID
 
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "message": "Cluster deleted"
-  }
-}
-```
-
 ---
 
 ### 导入集群
@@ -371,37 +277,13 @@
 
 **认证**: 需要JWT令牌
 
-**描述**: 导入现有Kubernetes集群
-
 **请求体**:
 ```json
 {
-  "import_source": "string",
   "name": "string",
   "description": "string",
-  "environment_type": "string",
-  "kubeconfig": "string",
-  "labels": {
-    "key": "value"
-  }
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "cluster_id": "660e8400-e29b-41d4-a716-446655440001",
-    "import_source": "manual",
-    "import_status": "pending",
-    "imported_resources": "pending",
-    "imported_by": "api-user",
-    "imported_at": "2025-01-01T00:00:00Z",
-    "completed_at": ""
-  }
+  "kubeconfig": "string (base64编码)",
+  "provider": "string"
 }
 ```
 
@@ -413,10 +295,6 @@
 
 **认证**: 需要JWT令牌
 
-**查询参数**:
-- `import_source`: 导入源过滤
-- `status`: 状态过滤
-
 **响应示例**:
 ```json
 {
@@ -426,45 +304,11 @@
     "imports": [
       {
         "id": "550e8400-e29b-41d4-a716-446655440000",
-        "cluster_id": "660e8400-e29b-41d4-a716-446655440001",
-        "import_source": "manual",
-        "import_status": "completed",
-        "imported_resources": "pending",
-        "imported_by": "api-user",
-        "imported_at": "2025-01-01T00:00:00Z",
-        "completed_at": "2025-01-01T00:05:00Z"
+        "cluster_name": "cluster1",
+        "status": "completed",
+        "created_at": "2025-01-01T00:00:00Z"
       }
-    ],
-    "total": 1
-  }
-}
-```
-
----
-
-### 获取导入状态
-
-**接口地址**: `GET /api/v1/imports/{importId}/status`
-
-**认证**: 需要JWT令牌
-
-**路径参数**:
-- `importId`: 导入记录ID
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "import_id": "550e8400-e29b-41d4-a716-446655440000",
-    "import_status": "completed",
-    "progress": 100,
-    "current_step": "Import completed successfully",
-    "error_message": "",
-    "validation_results": {
-      "kubeconfig_valid": true
-    }
+    ]
   }
 }
 ```
@@ -483,10 +327,10 @@
 - `id`: 集群ID
 
 **查询参数**:
-- `type`: 节点类型（control-plane, worker, master）
+- `type`: 节点类型 (control-plane/worker)
 - `status`: 节点状态
-- `page`: 页码（默认1）
-- `limit`: 每页数量（默认20）
+- `page`: 页码
+- `limit`: 每页数量
 
 **响应示例**:
 ```json
@@ -499,20 +343,17 @@
         "id": "550e8400-e29b-41d4-a716-446655440000",
         "name": "node1",
         "type": "control-plane",
-        "status": "ready",
-        "cpu_cores": 4,
+        "status": "Ready",
+        "cpu_cores": 20,
         "cpu_usage_percent": 45.5,
-        "memory_bytes": 17179869184,
-        "memory_usage_percent": 38.2,
-        "pod_count": 50,
+        "memory_bytes": 67155046400,
+        "memory_usage_percent": 60.2,
+        "pod_count": 35,
         "labels": {
-          "node-role.kubernetes.io/master": ""
-        },
-        "created_at": "2025-01-01T00:00:00Z",
-        "updated_at": "2025-01-01T00:00:00Z"
+          "kubernetes.io/hostname": "node1"
+        }
       }
     ],
-    "total": 1,
     "summary": {
       "control_plane_count": 1,
       "worker_count": 2,
@@ -534,43 +375,6 @@
 - `id`: 集群ID
 - `nodeName`: 节点名称
 
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "name": "node1",
-    "type": "control-plane",
-    "status": "ready",
-    "cpu_cores": 4,
-    "cpu_usage_percent": 45.5,
-    "memory_bytes": 17179869184,
-    "memory_usage_percent": 38.2,
-    "pod_count": 50,
-    "labels": {
-      "node-role.kubernetes.io/master": ""
-    },
-    "conditions": [
-      {
-        "type": "Ready",
-        "status": "True",
-        "reason": "KubeletReady",
-        "message": "kubelet is posting ready status"
-      }
-    ],
-    "addresses": [
-      {
-        "type": "InternalIP",
-        "address": "192.168.1.10"
-      }
-    ],
-    "created_at": "2025-01-01T00:00:00Z",
-    "updated_at": "2025-01-01T00:00:00Z"
-  }
-}
-```
-
 ---
 
 ## 事件接口
@@ -585,8 +389,9 @@
 - `id`: 集群ID
 
 **查询参数**:
-- `severity`: 严重程度（info, warning, error, critical）
-- `since`: 时间过滤（RFC3339格式）
+- `type`: 事件类型
+- `page`: 页码
+- `limit`: 每页数量
 
 **响应示例**:
 ```json
@@ -597,23 +402,15 @@
     "events": [
       {
         "id": "550e8400-e29b-41d4-a716-446655440000",
-        "event_type": "Node",
-        "message": "Node node1 has condition Ready",
-        "severity": "info",
-        "component": "kubelet",
+        "type": "Normal",
+        "reasonSet",
+        "": "ScalingReplicamessage": "Scaled up replica set",
         "count": 1,
-        "first_seen": "2025-01-01T00:00:00Z",
-        "last_seen": "2025-01-01T00:00:00Z",
-        "created_at": "2025-01-01T00:00:00Z"
+        "first_timestamp": "2025-01-01T00:00:00Z",
+        "last_timestamp": "2025-01-01T00:00:00Z"
       }
     ],
-    "total": 1,
-    "summary": {
-      "info_count": 1,
-      "warning_count": 0,
-      "error_count": 0,
-      "critical_count": 0
-    }
+    "total": 1
   }
 }
 ```
@@ -637,13 +434,21 @@
   "code": 0,
   "message": "success",
   "data": {
-    "pod_security_standard": "baseline",
-    "network_policies_enabled": true,
-    "network_policies_count": 5,
-    "rbac_enabled": true,
-    "rbac_roles_count": 10,
-    "audit_logging_enabled": true,
-    "audit_logging_mode": "request"
+    "policies": [
+      {
+        "name": "default-deny-all",
+        "type": "NetworkPolicy",
+        "namespace": "default",
+        "rules": [
+          {
+            "direction": "ingress",
+            "from": [],
+            "to": [],
+            "ports": []
+          }
+        ]
+      }
+    ]
   }
 }
 ```
@@ -667,21 +472,29 @@
   "code": 0,
   "message": "success",
   "data": {
-    "enabled": true,
-    "min_nodes": 1,
-    "max_nodes": 10,
-    "scale_up_threshold": 70,
-    "scale_down_threshold": 30,
-    "hpa_count": 3,
-    "cluster_autoscaler_enabled": true,
-    "vpa_count": 2,
-    "hpa_policies": [
+    "policies": [
       {
-        "name": "my-app",
+        "name": "nginx-hpa",
+        "type": "HorizontalPodAutoscaler",
         "namespace": "default",
+        "target": {
+          "kind": "Deployment",
+          "name": "nginx"
+        },
         "min_replicas": 2,
         "max_replicas": 10,
-        "current_replicas": 3
+        "metrics": [
+          {
+            "type": "Resource",
+            "resource": {
+              "name": "cpu",
+              "target": {
+                "type": "Utilization",
+                "average_utilization": 70
+              }
+            }
+          }
+        ]
       }
     ]
   }
@@ -692,7 +505,114 @@
 
 ## 备份接口
 
-### 创建备份
+### 注册etcd配置
+
+**接口地址**: `POST /api/v1/clusters/{id}/etcd/config`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+
+**请求体**:
+```json
+{
+  "endpoints": "https://172.30.1.12:2379,https://172.30.1.14:2379,https://172.30.1.15:2379",
+  "ca_cert": "/etc/ssl/etcd/ssl/ca.pem",
+  "cert": "/etc/ssl/etcd/ssl/admin-node2.pem",
+  "key": "/etc/ssl/etcd/ssl/admin-node2-key.pem",
+  "etcdctl_path": "/usr/local/bin/etcdctl",
+  "ssh_username": "root",
+  "ssh_password": "password"
+}
+```
+
+---
+
+### 获取etcd配置
+
+**接口地址**: `GET /api/v1/clusters/{id}/etcd/config`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+
+---
+
+### 创建etcd备份（独立接口）
+
+**接口地址**: `POST /api/v1/clusters/{id}/etcd/backups`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+
+**请求体**:
+```json
+{
+  "backup_name": "string",
+  "backup_type": "etcd",
+  "retention_days": 30
+}
+```
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "backup_name": "etcd-backup-20250101",
+    "backup_type": "etcd",
+    "status": "pending",
+    "storage_location": "/backups/cluster1/etcd-backup-20250101",
+    "snapshot_timestamp": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 创建资源备份（独立接口）
+
+**接口地址**: `POST /api/v1/clusters/{id}/resources/backups`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+
+**请求体**:
+```json
+{
+  "backup_name": "string",
+  "backup_type": "resources",
+  "retention_days": 30
+}
+```
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "backup_name": "resources-backup-20250101",
+    "backup_type": "resources",
+    "status": "pending",
+    "storage_location": "/backups/cluster1/resources-backup-20250101",
+    "snapshot_timestamp": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 创建完整备份（包含etcd和资源）
 
 **接口地址**: `POST /api/v1/clusters/{id}/backups`
 
@@ -705,14 +625,90 @@
 ```json
 {
   "backup_name": "string",
-  "backup_type": "string",
+  "backup_type": "full",
   "retention_days": 30
 }
 ```
 
 ---
 
-### 获取备份列表
+### 获取etcd备份列表
+
+**接口地址**: `GET /api/v1/clusters/{id}/etcd/backups`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+
+**查询参数**:
+- `status`: 备份状态
+- `page`: 页码
+- `limit`: 每页数量
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "backups": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "backup_name": "etcd-backup-20250101",
+        "backup_type": "etcd",
+        "status": "completed",
+        "storage_location": "/backups/cluster1/etcd-backup-20250101",
+        "storage_size_bytes": 894709792,
+        "snapshot_timestamp": "2025-01-01T00:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+---
+
+### 获取资源备份列表
+
+**接口地址**: `GET /api/v1/clusters/{id}/resources/backups`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+
+**查询参数**:
+- `status`: 备份状态
+- `page`: 页码
+- `limit`: 每页数量
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "backups": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "backup_name": "resources-backup-20250101",
+        "backup_type": "resources",
+        "status": "completed",
+        "storage_location": "/backups/cluster1/resources-backup-20250101",
+        "storage_size_bytes": 10705659,
+        "snapshot_timestamp": "2025-01-01T00:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+---
+
+### 获取完整备份列表
 
 **接口地址**: `GET /api/v1/clusters/{id}/backups`
 
@@ -752,7 +748,31 @@
 
 ---
 
-### 获取备份详情
+### 获取etcd备份详情
+
+**接口地址**: `GET /api/v1/clusters/{id}/etcd/backups/{backupId}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+- `backupId`: 备份ID
+
+---
+
+### 获取资源备份详情
+
+**接口地址**: `GET /api/v1/clusters/{id}/resources/backups/{backupId}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+- `backupId`: 备份ID
+
+---
+
+### 获取完整备份详情
 
 **接口地址**: `GET /api/v1/clusters/{id}/backups/{backupId}`
 
@@ -800,12 +820,11 @@
   "code": 0,
   "message": "success",
   "data": {
-    "restore_id": "550e8400-e29b-41d4-a716-446655440000",
-    "status": "in_progress",
-    "progress": 65.5,
-    "current_step": "Restoring etcd",
-    "start_time": "2025-01-01T00:00:00Z",
-    "estimated_time": 1800
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "completed",
+    "progress": 100,
+    "started_at": "2025-01-01T00:00:00Z",
+    "completed_at": "2025-01-01T01:00:00Z"
   }
 }
 ```
@@ -833,6 +852,72 @@
 **路径参数**:
 - `id`: 集群ID
 
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "schedules": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "daily-backup",
+        "cron_expr": "0 2 * * *",
+        "backup_type": "full",
+        "retention_days": 7,
+        "enabled": true
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 创建备份计划
+
+**接口地址**: `POST /api/v1/clusters/{id}/backup-schedules`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "cron_expr": "0 2 * * *",
+  "backup_type": "full",
+  "retention_days": 7,
+  "enabled": true
+}
+```
+
+---
+
+### 更新备份计划
+
+**接口地址**: `PUT /api/v1/clusters/{id}/backup-schedules/{scheduleId}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+- `scheduleId`: 计划ID
+
+---
+
+### 删除备份计划
+
+**接口地址**: `DELETE /api/v1/clusters/{id}/backup-schedules/{scheduleId}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 集群ID
+- `scheduleId`: 计划ID
+
 ---
 
 ## 拓扑接口
@@ -849,30 +934,44 @@
   "code": 0,
   "message": "success",
   "data": {
-    "environments": [
+    "clusters": [
       {
-        "type": "production",
-        "count": 3,
-        "clusters": [
-          {
-            "id": "550e8400-e29b-41d4-a716-446655440000",
-            "name": "prod-cluster-1",
-            "status": "healthy",
-            "node_count": 5,
-            "version": "v1.28.0"
-          }
-        ],
-        "total_node_count": 15,
-        "healthy_clusters": 3,
-        "unhealthy_clusters": 0
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "cluster1",
+        "status": "healthy",
+        "node_count": 3,
+        "version": "v1.24.9",
+        "provider": "太初"
       }
-    ],
-    "summary": {
-      "total_clusters": 3,
-      "total_environments": 2,
-      "total_nodes": 18,
-      "healthy_clusters": 3
-    }
+    ]
+  }
+}
+```
+
+---
+
+## 导入接口
+
+### 获取导入状态
+
+**接口地址**: `GET /api/v1/imports/{importId}/status`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `importId`: 导入记录ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "completed",
+    "cluster_id": "550e8400-e29b-41d4-a716-446655440001",
+    "progress": 100,
+    "logs": "Import completed successfully"
   }
 }
 ```
@@ -881,7 +980,60 @@
 
 ## 审计接口
 
-### 获取审计事件列表
+### 获取全局审计日志
+
+**接口地址**: `GET /api/v1/audit`
+
+**认证**: 需要JWT令牌
+
+**查询参数**:
+- `page`: 页码
+- `limit`: 每页数量
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "audit_logs": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "user_id": "550e8400-e29b-41d4-a716-446655440001",
+        "username": "admin",
+        "action": "CREATE_CLUSTER",
+        "resource_type": "cluster",
+        "resource_id": "550e8400-e29b-41d4-a716-446655440002",
+        "details": "Created cluster cluster1",
+        "timestamp": "2025-01-01T00:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+---
+
+### 创建审计日志
+
+**接口地址**: `POST /api/v1/audit`
+
+**认证**: 需要JWT令牌
+
+**请求体**:
+```json
+{
+  "action": "string",
+  "resource_type": "string",
+  "resource_id": "string",
+  "details": "string"
+}
+```
+
+---
+
+### 获取集群审计日志
 
 **接口地址**: `GET /api/v1/clusters/{id}/audit`
 
@@ -893,44 +1045,6 @@
 **查询参数**:
 - `page`: 页码
 - `limit`: 每页数量
-- `event_type`: 事件类型
-- `action`: 操作类型
-- `user`: 用户名
-- `result`: 结果
-- `start_time`: 开始时间
-- `end_time`: 结束时间
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "events": [
-      {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "event_type": "cluster",
-        "action": "create",
-        "resource": "cluster",
-        "resource_id": "550e8400-e29b-41d4-a716-446655440001",
-        "user": "admin",
-        "ip_address": "192.168.1.100",
-        "old_value": {},
-        "new_value": {
-          "name": "my-cluster",
-          "status": "active"
-        },
-        "details": {},
-        "result": "success",
-        "timestamp": "2025-01-01T00:00:00Z"
-      }
-    ],
-    "total": 1,
-    "page": 1,
-    "limit": 20
-  }
-}
-```
 
 ---
 
@@ -948,35 +1062,8 @@
 **请求体**:
 ```json
 {
-  "new_node_count": 5,
-  "new_cpu_cores": 20,
-  "new_memory_gb": 64,
-  "new_storage_gb": 500,
-  "reason": "业务增长需要"
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "cluster_id": "660e8400-e29b-41d4-a716-446655440001",
-    "old_node_count": 3,
-    "new_node_count": 5,
-    "old_cpu_cores": 12,
-    "new_cpu_cores": 20,
-    "old_memory_gb": 48,
-    "new_memory_gb": 64,
-    "old_storage_gb": 300,
-    "new_storage_gb": 500,
-    "status": "pending",
-    "reason": "业务增长需要",
-    "requested_by": "api-user",
-    "created_at": "2025-01-01T00:00:00Z"
-  }
+  "node_count": 5,
+  "instance_type": "string"
 }
 ```
 
@@ -1000,19 +1087,11 @@
     "expansions": [
       {
         "id": "550e8400-e29b-41d4-a716-446655440000",
-        "cluster_id": "660e8400-e29b-41d4-a716-446655440001",
-        "old_node_count": 3,
-        "new_node_count": 5,
-        "old_cpu_cores": 12,
-        "new_cpu_cores": 20,
-        "old_memory_gb": 48,
-        "new_memory_gb": 64,
-        "old_storage_gb": 300,
-        "new_storage_gb": 500,
+        "from_nodes": 3,
+        "to_nodes": 5,
         "status": "completed",
-        "reason": "业务增长需要",
-        "requested_by": "api-user",
-        "created_at": "2025-01-01T00:00:00Z"
+        "created_at": "2025-01-01T00:00:00Z",
+        "completed_at": "2025-01-01T01:00:00Z"
       }
     ]
   }
@@ -1033,39 +1112,10 @@
 ```json
 {
   "name": "string",
-  "ip_address": "string",
-  "internal_address": "string",
-  "user": "string",
+  "ip": "string",
+  "username": "string",
   "password": "string",
-  "role": "master|worker|etcd|registry",
-  "artifact_path": "string",
-  "image_repo": "string",
-  "registry_address": "string",
-  "labels": {
-    "key": "value"
-  }
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "machine-1",
-    "ip_address": "192.168.1.10",
-    "internal_address": "10.0.0.10",
-    "user": "root",
-    "role": "master",
-    "status": "available",
-    "labels": {
-      "rack": "rack1"
-    },
-    "created_at": "2025-01-01T00:00:00Z",
-    "updated_at": "2025-01-01T00:00:00Z"
-  }
+  "role": "control-plane"
 }
 ```
 
@@ -1078,10 +1128,9 @@
 **认证**: 需要JWT令牌
 
 **查询参数**:
+- `status`: 机器状态
 - `page`: 页码
 - `limit`: 每页数量
-- `status`: 状态过滤
-- `role`: 角色过滤
 
 **响应示例**:
 ```json
@@ -1092,22 +1141,13 @@
     "machines": [
       {
         "id": "550e8400-e29b-41d4-a716-446655440000",
-        "name": "machine-1",
-        "ip_address": "192.168.1.10",
-        "internal_address": "10.0.0.10",
-        "user": "root",
-        "role": "master",
-        "status": "available",
-        "labels": {
-          "rack": "rack1"
-        },
-        "created_at": "2025-01-01T00:00:00Z",
-        "updated_at": "2025-01-01T00:00:00Z"
+        "name": "machine1",
+        "ip": "192.168.1.100",
+        "status": "ready",
+        "role": "control-plane"
       }
     ],
-    "total": 1,
-    "page": 1,
-    "limit": 10
+    "total": 1
   }
 }
 ```
@@ -1134,7 +1174,13 @@
 **路径参数**:
 - `id`: 机器ID
 
-**请求体**: 同创建机器接口
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string"
+}
+```
 
 ---
 
@@ -1149,8 +1195,9 @@
 
 ---
 
-###**接口地址**: `PUT /api/v1/machines 更新机器状态
-/{id}/status`
+### 更新机器状态
+
+**接口地址**: `PUT /api/v1/machines/{id}/status`
 
 **认证**: 需要JWT令牌
 
@@ -1160,265 +1207,7 @@
 **请求体**:
 ```json
 {
-  "status": "available|unavailable|maintenance|error",
-  "message": "状态变更说明"
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "status": "maintenance",
-    "message": "计划维护中",
-    "updated_at": "2025-01-01T00:00:00Z"
-  }
-}
-```
-
----
-
-## 用户管理接口
-
-### 获取用户列表
-
-**接口地址**: `GET /api/v1/users`
-
-**认证**: 需要JWT令牌（需要管理员权限）
-
-**查询参数**:
-- `page`: 页码（默认1）
-- `limit`: 每页数量（默认20，最大100）
-- `role`: 角色过滤（admin, user）
-- `search`: 搜索关键词（搜索用户名和邮箱）
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "users": [
-      {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "username": "admin",
-        "email": "admin@example.com",
-        "role": "admin",
-        "created_at": "2025-01-01T00:00:00Z",
-        "last_login_at": "2025-01-01T12:00:00Z"
-      }
-    ],
-    "total": 1,
-    "page": 1,
-    "limit": 20
-  }
-}
-```
-
----
-
-### 获取用户详情
-
-**接口地址**: `GET /api/v1/users/{id}`
-
-**认证**: 需要JWT令牌（需要管理员权限或用户本人）
-
-**路径参数**:
-- `id`: 用户ID
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "username": "admin",
-    "email": "admin@example.com",
-    "role": "admin",
-    "created_at": "2025-01-01T00:00:00Z",
-    "updated_at": "2025-01-01T00:00:00Z",
-    "last_login_at": "2025-01-01T12:00:00Z"
-  }
-}
-```
-
----
-
-### 更新用户信息
-
-**接口地址**: `PUT /api/v1/users/{id}`
-
-**认证**: 需要JWT令牌（需要管理员权限或用户本人）
-
-**路径参数**:
-- `id`: 用户ID
-
-**请求体**:
-```json
-{
-  "email": "newemail@example.com",
-  "role": "user|admin"
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "username": "admin",
-    "email": "newemail@example.com",
-    "role": "user",
-    "updated_at": "2025-01-01T00:00:00Z"
-  }
-}
-```
-
----
-
-### 删除用户
-
-**接口地址**: `DELETE /api/v1/users/{id}`
-
-**认证**: 需要JWT令牌（需要管理员权限）
-
-**路径参数**:
-- `id`: 用户ID
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "message": "User deleted successfully"
-  }
-}
-```
-
----
-
-### 修改密码
-
-**接口地址**: `PUT /api/v1/users/{id}/password`
-
-**认证**: 需要JWT令牌（需要管理员权限或用户本人）
-
-**路径参数**:
-- `id`: 用户ID
-
-**请求体**:
-```json
-{
-  "old_password": "旧密码",
-  "new_password": "新密码"
-}
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "message": "Password updated successfully"
-  }
-}
-```
-
----
-
-## 错误码说明
-
-| 错误码 | 说明 | 示例场景 |
-|--------|------|----------|
-| 0 | 成功 | 请求处理成功 |
-| 400 | 请求参数错误 | 缺少必需参数、参数格式错误 |
-| 401 | 未授权 | 未提供token、token无效或已过期 |
-| 403 | 禁止访问 | 权限不足，无法访问资源 |
-| 404 | 资源不存在 | 请求的集群、节点等不存在 |
-| 409 | 资源冲突 | 创建同名集群、用户名已存在等 |
-| 422 | 请求无法处理 | 参数验证失败 |
-| 500 | 服务器内部错误 | 数据库连接失败、内部服务异常 |
-
-**错误响应格式**:
-```json
-{
-  "code": 400,
-  "message": "Invalid request parameter: name is required",
-  "data": null
-}
-```
-
----
-
-## 状态说明
-
-### 集群状态
-
-| 状态 | 说明 |
-|------|------|
-| unknown | 未知状态，可能是新创建的集群 |
-| healthy | 集群健康，所有组件正常运行 |
-| unhealthy | 集群不健康，部分组件异常 |
-| pending | 集群创建中，等待初始化完成 |
-| error | 集群错误，无法正常工作 |
-| maintenance | 集群维护中，暂时不可用 |
-
-### 节点状态
-
-| 状态 | 说明 |
-|------|------|
-| ready | 节点就绪，可以接受Pod调度 |
-| not_ready | 节点未就绪，可能存在异常 |
-| unknown | 节点状态未知，kubelet可能未响应 |
-
-### 备份状态
-
-| 状态 | 说明 |
-|------|------|
-| pending | 备份任务已创建，等待执行 |
-| in_progress | 备份正在进行中 |
-| completed | 备份成功完成 |
-| failed | 备份失败 |
-| deleted | 备份已删除 |
-
-### 扩展状态
-
-| 状态 | 说明 |
-|------|------|
-| pending | 扩展请求已提交，等待处理 |
-| in_progress | 扩展正在进行中 |
-| completed | 扩展成功完成 |
-| failed | 扩展失败 |
-| cancelled | 扩展已取消 |
-
-### 机器状态
-
-| 状态 | 说明 |
-|------|------|
-| available | 机器可用，可用于创建集群 |
-| unavailable | 机器不可用，可能存在故障 |
-| maintenance | 机器维护中，暂时不可用 |
-| error | 机器错误，需要人工干预 |
-| in_use | 机器已被集群使用 |
-
-### 导入状态
-
-| 状态 | 说明 |
-|------|------|
-| pending | 导入任务已创建，等待执行 |
-| in_progress | 导入正在进行中 |
-| completed | 导入成功完成 |
-| failed | 导入失败 |
-| cancelled | 导入已取消 |
-  "status": "available|in-use|deploying|maintenance|offline"
+  "status": "ready"
 }
 ```
 
@@ -1445,21 +1234,13 @@
     "tasks": [
       {
         "id": "550e8400-e29b-41d4-a716-446655440000",
-        "cluster_name": "my-cluster",
+        "cluster_name": "cluster1",
         "status": "completed",
         "progress": 100,
-        "current_step": "Cluster created successfully",
-        "kubernetes_version": "v1.28.0",
-        "network_plugin": "calico",
-        "started_at": "2025-01-01T00:00:00Z",
-        "completed_at": "2025-01-01T00:30:00Z",
-        "created_at": "2025-01-01T00:00:00Z",
-        "updated_at": "2025-01-01T00:30:00Z"
+        "created_at": "2025-01-01T00:00:00Z"
       }
     ],
-    "total": 1,
-    "page": 1,
-    "limit": 10
+    "total": 1
   }
 }
 ```
@@ -1482,88 +1263,62 @@
   "message": "success",
   "data": {
     "id": "550e8400-e29b-41d4-a716-446655440000",
-    "cluster_name": "my-cluster",
+    "cluster_name": "cluster1",
     "status": "completed",
     "progress": 100,
-    "current_step": "Cluster created successfully",
-    "logs": "...",
-    "error_msg": "",
-    "kubernetes_version": "v1.28.0",
-    "network_plugin": "calico",
-    "started_at": "2025-01-01T00:00:00Z",
-    "completed_at": "2025-01-01T00:30:00Z",
+    "logs": "Cluster created successfully",
     "created_at": "2025-01-01T00:00:00Z",
-    "updated_at": "2025-01-01T00:30:00Z"
+    "completed_at": "2025-01-01T01:00:00Z"
   }
 }
 ```
 
 ---
 
-## 错误响应格式
+## 错误码说明
 
-所有接口的错误响应都遵循统一格式：
-
-```json
-{
-  "code": 1,
-  "message": "错误描述",
-  "data": null
-}
-```
-
-**常见错误码**:
-- `0`: 成功
-- `1`: 通用错误
-- `400`: 请求参数错误
-- `401`: 未认证或令牌无效
-- `403`: 权限不足
-- `404`: 资源不存在
-- `409`: 资源冲突（如集群名称已存在）
-- `500`: 服务器内部错误
+| 错误码 | 说明 |
+|--------|------|
+| 0 | 成功 |
+| -1 | 通用错误 |
+| 400 | 请求参数错误 |
+| 401 | 未认证或认证失败 |
+| 403 | 权限不足 |
+| 404 | 资源不存在 |
+| 500 | 服务器内部错误 |
 
 ---
 
-## 数据类型说明
+## 状态说明
 
-### 时间格式
-所有时间字段使用RFC3339格式，例如：`2025-01-01T00:00:00Z`
+### 集群状态
+- `pending`: 待创建
+- `creating`: 创建中
+- `running`: 运行中
+- `healthy`: 健康
+- `unhealthy`: 不健康
+- `deleting`: 删除中
+- `deleted`: 已删除
 
-### UUID格式
-所有ID字段使用UUID v4格式，例如：`550e8400-e29b-41d4-a716-446655440000`
+### 节点状态
+- `Pending`: 待调度
+- `Running`: 运行中
+- `Ready`: 就绪
+- `NotReady`: 未就绪
+- `Unknown`: 未知状态
 
-### 标签格式
-标签为键值对，JSON格式：
-```json
-{
-  "key1": "value1",
-  "key2": "value2"
-}
-```
+### 备份状态
+- `pending`: 待执行
+- `running`: 执行中
+- `completed`: 已完成
+- `failed`: 已失败
 
-### 状态值
-- **集群状态**: `unknown`, `healthy`, `unhealthy`, `disconnected`
-- **节点状态**: `ready`, `notready`, `unknown`
-- **机器状态**: `available`, `in-use`, `deploying`, `maintenance`, `offline`
-- **事件严重程度**: `info`, `warning`, `error`, `critical`
-- **任务状态**: `pending`, `running`, `completed`, `failed`
-
----
-
-## 注意事项
-
-1. **认证**: 除登录、注册、刷新令牌、获取用户信息、登出和生成测试令牌接口外，所有接口都需要JWT认证。
-
-2. **分页**: 所有列表接口都支持分页，使用`page`和`limit`参数。
-
-3. **过滤**: 大部分列表接口支持通过查询参数进行过滤。
-
-4. **异步操作**: 集群创建、导入、备份、恢复、扩展等操作是异步的，返回的是任务ID，需要通过相应接口查询进度。
-
-5. **权限**: 不同角色的用户拥有不同的API访问权限。
+### 恢复状态
+- `pending`: 待执行
+- `running`: 执行中
+- `completed`: 已完成
+- `failed`: 已失败
 
 ---
 
-## 联系我们
-
-如有疑问，请联系系统管理员。
+**注意**: 本文档基于当前API版本v1生成，接口可能会随版本更新而变化。

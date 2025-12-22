@@ -46,6 +46,21 @@ type BackupSchedule struct {
 	CreatedBy   string    `json:"created_by" gorm:"size:100;not null"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+
+	// 兼容旧字段名
+	ScheduleName    string `json:"-" gorm:"column:schedule_name;size:255;not null"`
+	CronExpression  string `json:"-" gorm:"column:cron_expression;size:100;not null"`
+	RetentionCount  int    `json:"-" gorm:"column:retention_count;default:7"`
+
+	// etcd配置
+	EtcdEndpoints string `json:"etcd_endpoints" gorm:"type:text"`
+	EtcdCaCert    string `json:"etcd_ca_cert" gorm:"type:text"`
+	EtcdCert      string `json:"etcd_cert" gorm:"type:text"`
+	EtcdKey       string `json:"etcd_key" gorm:"type:text"`
+	EtcdDataDir   string `json:"etcd_data_dir" gorm:"size:255;default:'/var/lib/etcd'"`
+	EtcdctlPath   string `json:"etcdctl_path" gorm:"size:255;default:'/usr/bin/etcdctl'"`
+	SshUsername   string `json:"ssh_username" gorm:"size:255;default:'root'"`
+	SshPassword   string `json:"ssh_password" gorm:"size:255"`
 }
 
 func (BackupSchedule) TableName() string {

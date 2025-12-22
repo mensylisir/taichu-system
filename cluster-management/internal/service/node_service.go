@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -144,9 +145,9 @@ func (s *NodeService) SyncNodesFromKubernetes(clusterID string) error {
 			Name:            k8sNode.Name,
 			Type:            nodeType,
 			Status:          s.getNodeStatus(k8sNode),
-			CPUCores:        int(k8sNode.Status.Allocatable.Cpu().MilliValue() / 1000),
+			CPUCores:        int(k8sNode.Status.Capacity.Cpu().MilliValue() / 1000), // 显示逻辑CPU数
 			CPUUsedCores:    0, // 需要从metrics-server获取
-			MemoryBytes:     k8sNode.Status.Allocatable.Memory().Value(),
+			MemoryBytes:     k8sNode.Status.Capacity.Memory().Value(), // 使用Capacity而不是Allocatable
 			MemoryUsedBytes: 0, // 需要从metrics-server获取
 			PodCount:        podCount,
 			Labels:          convertToJSONMap(k8sNode.Labels),
@@ -171,12 +172,21 @@ func (s *NodeService) determineNodeType(labels map[string]string) string {
 }
 
 func (s *NodeService) countPodsOnNode(ctx context.Context, clientset *kubernetes.Clientset, nodeName string) int {
+	log.Printf("[NODE-SYNC] Counting pods for node: %s", nodeName)
+
 	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
 	})
 	if err != nil {
+		log.Printf("[NODE-SYNC] Error listing pods for node %s: %v", nodeName, err)
 		return 0
 	}
+
+	log.Printf("[NODE-SYNC] Found %d pods for node %s", len(pods.Items), nodeName)
+	for _, pod := range pods.Items {
+		log.Printf("[NODE-SYNC] Pod: %s/%s (status: %s)", pod.Namespace, pod.Name, pod.Status.Phase)
+	}
+
 	return len(pods.Items)
 }
 
