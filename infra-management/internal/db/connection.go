@@ -21,5 +21,11 @@ func InitDB(cfg *config.Config) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// 尝试设置客户端编码，如果失败则忽略
+	_, err = db.Exec("SET client_encoding TO 'UTF8'")
+	if err != nil {
+		fmt.Println("警告: 设置客户端编码失败: ", err)
+	}
+
 	return db, nil
 }
