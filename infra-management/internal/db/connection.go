@@ -9,7 +9,7 @@ import (
 )
 
 func InitDB(cfg *config.Config) (*sql.DB, error) {
-	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable client_encoding=utf8",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)
 
 	db, err := sql.Open("postgres", psqlInfo)
@@ -21,10 +21,10 @@ func InitDB(cfg *config.Config) (*sql.DB, error) {
 		return nil, err
 	}
 
-	// 尝试设置客户端编码，如果失败则忽略
+	// 在连接字符串中设置客户端编码为 UTF-8
 	_, err = db.Exec("SET client_encoding TO 'UTF8'")
 	if err != nil {
-		fmt.Println("警告: 设置客户端编码失败: ", err)
+		return nil, err
 	}
 
 	return db, nil
