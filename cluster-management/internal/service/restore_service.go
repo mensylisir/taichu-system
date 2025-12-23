@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,10 +19,14 @@ import (
 )
 
 type RestoreService struct {
-	backupRepo     *repository.BackupRepository
-	clusterRepo    *repository.ClusterRepository
-	encryptionSvc  *EncryptionService
-	clusterManager *ClusterManager
+	backupRepo          *repository.BackupRepository
+	backupScheduleRepo  *repository.BackupScheduleRepository
+	clusterRepo         *repository.ClusterRepository
+	encryptionSvc       *EncryptionService
+	clusterManager      *ClusterManager
+	sshService          *SSHService
+	controlPlaneManager ControlPlaneManager
+	mu                  sync.RWMutex
 }
 
 type RestoreResult struct {
@@ -42,17 +48,117 @@ type RestoreProgress struct {
 	EstimatedTime int       `json:"estimated_time,omitempty"`
 }
 
+type EtcdNodeConfig struct {
+	Nodes []EtcdNodeInfo
+}
+
+type EtcdNodeInfo struct {
+	IP          string
+	Port        int
+	CACert      string
+	Cert        string
+	Key         string
+	DataDir     string
+	Endpoints   []string
+	SSHUsername string
+	SSHPassword string
+}
+
+type ControlPlaneManager interface {
+	StopControlPlaneComponents(ctx context.Context) error
+	StartControlPlaneComponents(ctx context.Context) error
+}
+
+type SSHControlPlaneManager struct {
+	sshService    *SSHService
+	nodes         []EtcdNodeInfo
+	etcdStopCmds  []string
+	etcdStartCmds []string
+	k8sStopCmds   []string
+	k8sStartCmds  []string
+}
+
+func NewSSHControlPlaneManager(sshService *SSHService, nodes []EtcdNodeInfo, etcdStopCmds, etcdStartCmds, k8sStopCmds, k8sStartCmds []string) *SSHControlPlaneManager {
+	return &SSHControlPlaneManager{
+		sshService:    sshService,
+		nodes:         nodes,
+		etcdStopCmds:  etcdStopCmds,
+		etcdStartCmds: etcdStartCmds,
+		k8sStopCmds:   k8sStopCmds,
+		k8sStartCmds:  k8sStartCmds,
+	}
+}
+
+func (m *SSHControlPlaneManager) StopControlPlaneComponents(ctx context.Context) error {
+	if len(m.nodes) == 0 {
+		return fmt.Errorf("no nodes configured")
+	}
+
+	for _, node := range m.nodes {
+		sshClient, err := m.sshService.Connect(node.IP, node.SSHUsername, node.SSHPassword)
+		if err != nil {
+			return fmt.Errorf("failed to connect to node %s: %w", node.IP, err)
+		}
+		defer sshClient.Close()
+
+		for _, cmd := range m.etcdStopCmds {
+			if _, err := sshClient.ExecuteCommand(cmd); err != nil {
+				return fmt.Errorf("failed to execute etcd stop command '%s' on node %s: %w", cmd, node.IP, err)
+			}
+		}
+
+		for _, cmd := range m.k8sStopCmds {
+			if _, err := sshClient.ExecuteCommand(cmd); err != nil {
+				return fmt.Errorf("failed to execute k8s stop command '%s' on node %s: %w", cmd, node.IP, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (m *SSHControlPlaneManager) StartControlPlaneComponents(ctx context.Context) error {
+	if len(m.nodes) == 0 {
+		return fmt.Errorf("no nodes configured")
+	}
+
+	for _, node := range m.nodes {
+		sshClient, err := m.sshService.Connect(node.IP, node.SSHUsername, node.SSHPassword)
+		if err != nil {
+			return fmt.Errorf("failed to connect to node %s: %w", node.IP, err)
+		}
+		defer sshClient.Close()
+
+		for _, cmd := range m.etcdStartCmds {
+			if _, err := sshClient.ExecuteCommand(cmd); err != nil {
+				return fmt.Errorf("failed to execute etcd start command '%s' on node %s: %w", cmd, node.IP, err)
+			}
+		}
+
+		for _, cmd := range m.k8sStartCmds {
+			if _, err := sshClient.ExecuteCommand(cmd); err != nil {
+				return fmt.Errorf("failed to execute k8s start command '%s' on node %s: %w", cmd, node.IP, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func NewRestoreService(
 	backupRepo *repository.BackupRepository,
+	backupScheduleRepo *repository.BackupScheduleRepository,
 	clusterRepo *repository.ClusterRepository,
 	encryptionSvc *EncryptionService,
 	clusterManager *ClusterManager,
 ) *RestoreService {
 	return &RestoreService{
-		backupRepo:     backupRepo,
-		clusterRepo:    clusterRepo,
-		encryptionSvc:  encryptionSvc,
-		clusterManager: clusterManager,
+		backupRepo:         backupRepo,
+		backupScheduleRepo: backupScheduleRepo,
+		clusterRepo:        clusterRepo,
+		encryptionSvc:      encryptionSvc,
+		clusterManager:     clusterManager,
+		sshService:         NewSSHService(),
 	}
 }
 
@@ -229,37 +335,315 @@ func (s *RestoreService) prepareRestoreEnvironment(ctx context.Context, clientse
 }
 
 func (s *RestoreService) restoreEtcdData(ctx context.Context, clientset *kubernetes.Clientset, backup *model.ClusterBackup, restoreName string) error {
-	// 实现etcd数据恢复逻辑
-	// 这里应该连接到etcd集群并执行恢复操作
+	fmt.Printf("[RESTORE-ETCD] Starting etcd data restore for backup %s\n", backup.ID.String())
+
+	backupPath := s.getBackupPath(backup)
+	etcdSnapshotPath := filepath.Join(backupPath, "etcd.snapshot")
+
+	if _, err := os.Stat(etcdSnapshotPath); os.IsNotExist(err) {
+		return fmt.Errorf("etcd snapshot file not found at %s", etcdSnapshotPath)
+	}
+
+	if err := s.stopControlPlaneComponents(ctx, clientset); err != nil {
+		return fmt.Errorf("failed to stop control plane components: %w", err)
+	}
+
+	if err := s.restoreEtcdSnapshot(ctx, clientset, etcdSnapshotPath); err != nil {
+		return fmt.Errorf("failed to restore etcd snapshot: %w", err)
+	}
+
+	if err := s.startControlPlaneComponents(ctx, clientset); err != nil {
+		return fmt.Errorf("failed to start control plane components: %w", err)
+	}
+
+	fmt.Printf("[RESTORE-ETCD] Etcd data restore completed successfully\n")
 	return nil
 }
 
 func (s *RestoreService) restoreResourceManifests(ctx context.Context, clientset *kubernetes.Clientset, backup *model.ClusterBackup, restoreName string) error {
-	// 实现资源清单恢复逻辑
-	// 这里应该从备份存储中获取资源清单并应用到集群
+	fmt.Printf("[RESTORE-RESOURCES] Starting resource manifests restore for backup %s\n", backup.ID.String())
+
+	backupPath := s.getBackupPath(backup)
+	resourcesPath := filepath.Join(backupPath, "resources")
+
+	if _, err := os.Stat(resourcesPath); os.IsNotExist(err) {
+		fmt.Printf("[RESTORE-RESOURCES] No resources directory found, skipping resource restore\n")
+		return nil
+	}
+
+	resourceTypes := []string{"namespaces", "pv", "pvc", "configmaps", "secrets", "deployments", "services", "ingresses"}
+
+	for _, resourceType := range resourceTypes {
+		resourcePath := filepath.Join(resourcesPath, resourceType)
+		if _, err := os.Stat(resourcePath); os.IsNotExist(err) {
+			fmt.Printf("[RESTORE-RESOURCES] Resource type %s not found, skipping\n", resourceType)
+			continue
+		}
+
+		fmt.Printf("[RESTORE-RESOURCES] Restoring %s resources\n", resourceType)
+		if err := s.restoreResourcesOfType(ctx, clientset, resourcePath, resourceType); err != nil {
+			return fmt.Errorf("failed to restore %s: %w", resourceType, err)
+		}
+	}
+
+	fmt.Printf("[RESTORE-RESOURCES] Resource manifests restore completed successfully\n")
 	return nil
 }
 
 func (s *RestoreService) verifyRestoreResult(ctx context.Context, clientset *kubernetes.Clientset, restoreName string) error {
-	// 验证恢复结果
-	// 检查关键资源是否已正确恢复
+	fmt.Printf("[VERIFY-RESTORE] Starting restore result verification\n")
+
+	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list namespaces: %w", err)
+	}
+
+	fmt.Printf("[VERIFY-RESTORE] Found %d namespaces\n", len(namespaces.Items))
+
+	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	runningPods := 0
+	for _, pod := range pods.Items {
+		if pod.Status.Phase == corev1.PodRunning {
+			runningPods++
+		}
+	}
+
+	fmt.Printf("[VERIFY-RESTORE] Found %d pods, %d running\n", len(pods.Items), runningPods)
+
+	deployments, err := clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list deployments: %w", err)
+	}
+
+	readyDeployments := 0
+	for _, deploy := range deployments.Items {
+		if deploy.Status.ReadyReplicas == *deploy.Spec.Replicas {
+			readyDeployments++
+		}
+	}
+
+	fmt.Printf("[VERIFY-RESTORE] Found %d deployments, %d ready\n", len(deployments.Items), readyDeployments)
+
+	fmt.Printf("[VERIFY-RESTORE] Restore verification completed successfully\n")
 	return nil
 }
 
 func (s *RestoreService) stopControlPlaneComponents(ctx context.Context, clientset *kubernetes.Clientset) error {
-	// 停止控制平面组件
-	// 这通常需要通过SSH或kubectl exec在控制节点上执行命令
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.controlPlaneManager == nil {
+		if err := s.initControlPlaneManager(); err != nil {
+			return fmt.Errorf("failed to initialize control plane manager: %w", err)
+		}
+	}
+
+	return s.controlPlaneManager.StopControlPlaneComponents(ctx)
 }
 
 func (s *RestoreService) startControlPlaneComponents(ctx context.Context, clientset *kubernetes.Clientset) error {
-	// 启动控制平面组件
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.controlPlaneManager == nil {
+		if err := s.initControlPlaneManager(); err != nil {
+			return fmt.Errorf("failed to initialize control plane manager: %w", err)
+		}
+	}
+
+	return s.controlPlaneManager.StartControlPlaneComponents(ctx)
+}
+
+func (s *RestoreService) initControlPlaneManager() error {
+	schedules, err := s.backupScheduleRepo.ListEnabled()
+	if err != nil {
+		return fmt.Errorf("failed to list backup schedules: %w", err)
+	}
+	if len(schedules) == 0 {
+		return fmt.Errorf("no backup schedule found")
+	}
+
+	schedule := schedules[0]
+	if schedule.EtcdEndpoints == "" {
+		return fmt.Errorf("etcd_endpoints not set in backup schedule")
+	}
+
+	nodes := parseEndpointsToNodes(schedule.EtcdEndpoints)
+	if len(nodes) == 0 {
+		return fmt.Errorf("no etcd nodes found from endpoints")
+	}
+
+	etcdNodes := make([]EtcdNodeInfo, len(nodes))
+	for i, node := range nodes {
+		etcdNodes[i] = EtcdNodeInfo{
+			IP:          node,
+			Port:        2379,
+			CACert:      schedule.EtcdCaCert,
+			Cert:        schedule.EtcdCert,
+			Key:         schedule.EtcdKey,
+			DataDir:     schedule.EtcdDataDir,
+			Endpoints:   strings.Split(schedule.EtcdEndpoints, ","),
+			SSHUsername: schedule.SshUsername,
+			SSHPassword: schedule.SshPassword,
+		}
+	}
+
+	etcdStopCmds := s.getEtcdStopCommands(schedule.EtcdDeploymentType)
+	etcdStartCmds := s.getEtcdStartCommands(schedule.EtcdDeploymentType)
+	k8sStopCmds := s.getK8sStopCommands(schedule.K8sDeploymentType)
+	k8sStartCmds := s.getK8sStartCommands(schedule.K8sDeploymentType)
+
+	s.controlPlaneManager = NewSSHControlPlaneManager(s.sshService, etcdNodes, etcdStopCmds, etcdStartCmds, k8sStopCmds, k8sStartCmds)
 	return nil
 }
 
+func (s *RestoreService) getEtcdStopCommands(deploymentType string) []string {
+	switch deploymentType {
+	case "kubexm":
+		return []string{
+			"sudo systemctl stop etcd",
+		}
+	case "kubeadm":
+		return []string{
+			"sudo mv /etc/kubernetes/manifests/etcd.yaml /tmp/etcd.yaml",
+		}
+	default:
+		return []string{
+			"sudo systemctl stop etcd",
+		}
+	}
+}
+
+func (s *RestoreService) getEtcdStartCommands(deploymentType string) []string {
+	switch deploymentType {
+	case "kubexm":
+		return []string{
+			"sudo systemctl start etcd",
+		}
+	case "kubeadm":
+		return []string{
+			"sudo mv /tmp/etcd.yaml /etc/kubernetes/manifests/etcd.yaml",
+		}
+	default:
+		return []string{
+			"sudo systemctl start etcd",
+		}
+	}
+}
+
+func (s *RestoreService) getK8sStopCommands(deploymentType string) []string {
+	switch deploymentType {
+	case "kubexm":
+		return []string{
+			"sudo systemctl stop kube-apiserver",
+		}
+	case "kubeadm":
+		return []string{
+			"sudo mv /etc/kubernetes/manifests/kube-apiserver.yaml /tmp/kube-apiserver.yaml",
+		}
+	default:
+		return []string{
+			"sudo systemctl stop kube-apiserver",
+		}
+	}
+}
+
+func (s *RestoreService) getK8sStartCommands(deploymentType string) []string {
+	switch deploymentType {
+	case "kubexm":
+		return []string{
+			"sudo systemctl start kube-apiserver",
+		}
+	case "kubeadm":
+		return []string{
+			"sudo mv /tmp/kube-apiserver.yaml /etc/kubernetes/manifests/kube-apiserver.yaml",
+		}
+	default:
+		return []string{
+			"sudo systemctl start kube-apiserver",
+		}
+	}
+}
+
 func (s *RestoreService) restoreEtcdSnapshot(ctx context.Context, clientset *kubernetes.Clientset, snapshotPath string) error {
-	// 恢复etcd快照
-	return nil
+	fmt.Printf("[ETCD-RESTORE] Starting etcd snapshot restore from %s\n", snapshotPath)
+
+	schedules, err := s.backupScheduleRepo.ListEnabled()
+	if err != nil {
+		return fmt.Errorf("failed to list backup schedules: %w", err)
+	}
+	if len(schedules) == 0 {
+		return fmt.Errorf("no backup schedule found")
+	}
+
+	schedule := schedules[0]
+	if schedule.EtcdEndpoints == "" {
+		return fmt.Errorf("etcd_endpoints not set in backup schedule")
+	}
+
+	nodes := parseEndpointsToNodes(schedule.EtcdEndpoints)
+	if len(nodes) == 0 {
+		return fmt.Errorf("no etcd nodes found from endpoints")
+	}
+
+	timestamp := time.Now().Format("20060102-150405")
+	remoteSnapshotPath := fmt.Sprintf("/backup/etcd-snapshot-restore-%s.db", timestamp)
+
+	for i, node := range nodes {
+		fmt.Printf("[ETCD-RESTORE] Trying to restore to node %d/%d: %s\n", i+1, len(nodes), node)
+
+		sshUsername := schedule.SshUsername
+		if sshUsername == "" {
+			sshUsername = "root"
+		}
+
+		sshPassword := schedule.SshPassword
+		if sshPassword == "" {
+			return fmt.Errorf("ssh_password not set in backup schedule")
+		}
+
+		sshClient, err := s.sshService.Connect(node, sshUsername, sshPassword)
+		if err != nil {
+			fmt.Printf("[ETCD-RESTORE] Failed to connect to node %s: %v\n", node, err)
+			continue
+		}
+		defer sshClient.Close()
+
+		fmt.Printf("[ETCD-RESTORE] Uploading snapshot file to %s\n", node)
+		if err := sshClient.UploadFile(snapshotPath, remoteSnapshotPath); err != nil {
+			fmt.Printf("[ETCD-RESTORE] Failed to upload snapshot to %s: %v\n", node, err)
+			continue
+		}
+
+		firstEndpoint := schedule.EtcdEndpoints
+		if strings.Contains(firstEndpoint, ",") {
+			firstEndpoint = strings.Split(firstEndpoint, ",")[0]
+		}
+
+		restoreCmd := fmt.Sprintf("%s snapshot restore %s --data-dir=%s",
+			schedule.EtcdctlPath, remoteSnapshotPath, schedule.EtcdDataDir)
+
+		fmt.Printf("[ETCD-RESTORE] Executing restore command: %s\n", restoreCmd)
+
+		if _, err := sshClient.ExecuteCommand(restoreCmd); err != nil {
+			fmt.Printf("[ETCD-RESTORE] Failed to execute restore command on %s: %v\n", node, err)
+			cleanupCmd := fmt.Sprintf("rm -f %s", remoteSnapshotPath)
+			sshClient.ExecuteCommand(cleanupCmd)
+			continue
+		}
+
+		cleanupCmd := fmt.Sprintf("rm -f %s", remoteSnapshotPath)
+		sshClient.ExecuteCommand(cleanupCmd)
+
+		fmt.Printf("[ETCD-RESTORE] Successfully restored etcd snapshot on node %s\n", node)
+		return nil
+	}
+
+	return fmt.Errorf("etcd snapshot restore failed - no accessible etcd node found")
 }
 
 func (s *RestoreService) restoreResourcesOfType(ctx context.Context, clientset *kubernetes.Clientset, resourcePath, resourceType string) error {
@@ -307,7 +691,23 @@ func (s *RestoreService) logRestoreError(restoreID string, err error) {
 }
 
 func (s *RestoreService) logRestoreSuccess(restoreID string) {
-	// 记录恢复成功
 	fmt.Printf("Restore %s completed successfully\n", restoreID)
 }
-
+
+func parseEndpointsToNodes(endpoints string) []string {
+	var nodes []string
+	epList := strings.Split(endpoints, ",")
+	for _, ep := range epList {
+		host := ep
+		if strings.HasPrefix(host, "https://") {
+			host = strings.TrimPrefix(host, "https://")
+		} else if strings.HasPrefix(host, "http://") {
+			host = strings.TrimPrefix(host, "http://")
+		}
+		if strings.Contains(host, ":") {
+			host = strings.Split(host, ":")[0]
+		}
+		nodes = append(nodes, host)
+	}
+	return nodes
+}

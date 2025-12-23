@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,7 +25,7 @@ func Error(c *gin.Context, statusCode int, format string, args ...interface{}) {
 	c.Header("Content-Type", "application/json; charset=utf-8")
 	message := format
 	if len(args) > 0 {
-		message = format
+		message = fmt.Sprintf(format, args...)
 	}
 
 	c.JSON(statusCode, Response{

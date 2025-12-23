@@ -167,6 +167,14 @@ func main() {
 		clusterManager,
 	)
 
+	restoreService := service.NewRestoreService(
+		backupRepo,
+		backupScheduleRepo,
+		clusterRepo,
+		encryptionService,
+		clusterManager,
+	)
+
 	topologyService := service.NewTopologyService(
 		clusterRepo,
 		stateRepo,
@@ -219,7 +227,7 @@ func main() {
 	eventHandler := handler.NewEventHandler(eventService)
 	securityPolicyHandler := handler.NewSecurityPolicyHandler(securityPolicyService)
 	autoscalingPolicyHandler := handler.NewAutoscalingPolicyHandler(autoscalingPolicyService)
-	backupHandler := handler.NewBackupHandler(backupService, auditService)
+	backupHandler := handler.NewBackupHandler(backupService, restoreService, auditService)
 	topologyHandler := handler.NewTopologyHandler(topologyService)
 	importHandler := handler.NewImportHandler(importService, healthCheckWorker, resourceSyncWorker, auditService)
 	auditHandler := handler.NewAuditHandler(auditService)
@@ -457,13 +465,6 @@ func setupRoutes(
 			autoscaling := clusters.Group(":id/autoscaling-policies")
 			{
 				autoscaling.GET("", autoscalingPolicyHandler.GetAutoscalingPolicy)
-			}
-
-			// etcd配置相关接口
-			etcd := clusters.Group(":id/etcd")
-			{
-				etcd.POST("config", backupHandler.RegisterEtcdConfig)
-				etcd.GET("config", backupHandler.GetEtcdConfig)
 			}
 
 			// 备份相关接口

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -24,32 +25,33 @@ type ClusterInformer struct {
 	clusterID           uuid.UUID
 	kubeconfig          string
 	clientset           *kubernetes.Clientset
+	ctx                 context.Context
 	nodeInformer        cache.SharedIndexInformer
 	pvcInformer         cache.SharedIndexInformer
 	eventInformer       cache.SharedIndexInformer
 	stopCh              chan struct{}
+	stopOnce            sync.Once
 	nodeRepo            *repository.NodeRepository
 	eventRepo           *repository.EventRepository
 	clusterResourceRepo *repository.ClusterResourceRepository
-	cache               ResourceCache // 添加缓存层
+	cache               ResourceCache
 }
 
 // NewClusterInformer 创建一个新的集群 Informer
 func NewClusterInformer(
+	ctx context.Context,
 	clusterID uuid.UUID,
 	kubeconfig string,
 	nodeRepo *repository.NodeRepository,
 	eventRepo *repository.EventRepository,
 	clusterResourceRepo *repository.ClusterResourceRepository,
-	cache ResourceCache, // 添加缓存参数
+	cache ResourceCache,
 ) (*ClusterInformer, error) {
-	// 使用 kubeconfig 创建客户端配置
 	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
 	if err != nil {
 		return nil, err
 	}
 
-	// 创建 clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -59,6 +61,7 @@ func NewClusterInformer(
 		clusterID:           clusterID,
 		kubeconfig:          kubeconfig,
 		clientset:           clientset,
+		ctx:                 ctx,
 		stopCh:              make(chan struct{}),
 		nodeRepo:            nodeRepo,
 		eventRepo:           eventRepo,
@@ -66,7 +69,6 @@ func NewClusterInformer(
 		cache:               cache,
 	}
 
-	// 初始化 Informer
 	informer.initInformers()
 
 	return informer, nil
@@ -74,52 +76,48 @@ func NewClusterInformer(
 
 // initInformers 初始化所有需要的 Informer
 func (ci *ClusterInformer) initInformers() {
-	// Node Informer
 	ci.nodeInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return ci.clientset.CoreV1().Nodes().List(context.TODO(), options)
+				return ci.clientset.CoreV1().Nodes().List(ci.ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return ci.clientset.CoreV1().Nodes().Watch(context.TODO(), options)
+				return ci.clientset.CoreV1().Nodes().Watch(ci.ctx, options)
 			},
 		},
 		&corev1.Node{},
-		time.Minute*10, // 重新同步周期
+		time.Minute*10,
 		cache.Indexers{},
 	)
 
-	// PVC Informer
 	ci.pvcInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return ci.clientset.CoreV1().PersistentVolumeClaims("").List(context.TODO(), options)
+				return ci.clientset.CoreV1().PersistentVolumeClaims("").List(ci.ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return ci.clientset.CoreV1().PersistentVolumeClaims("").Watch(context.TODO(), options)
+				return ci.clientset.CoreV1().PersistentVolumeClaims("").Watch(ci.ctx, options)
 			},
 		},
 		&corev1.PersistentVolumeClaim{},
-		time.Minute*10, // 重新同步周期
+		time.Minute*10,
 		cache.Indexers{},
 	)
 
-	// Event Informer
 	ci.eventInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return ci.clientset.CoreV1().Events("").List(context.TODO(), options)
+				return ci.clientset.CoreV1().Events("").List(ci.ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return ci.clientset.CoreV1().Events("").Watch(context.TODO(), options)
+				return ci.clientset.CoreV1().Events("").Watch(ci.ctx, options)
 			},
 		},
 		&corev1.Event{},
-		time.Minute*10, // 重新同步周期
+		time.Minute*10,
 		cache.Indexers{},
 	)
 
-	// 设置事件处理程序
 	ci.setupEventHandlers()
 }
 
@@ -194,8 +192,10 @@ func (ci *ClusterInformer) Start() {
 
 // Stop 停止 Informer
 func (ci *ClusterInformer) Stop() {
-	log.Printf("Stopping informers for cluster %s", ci.clusterID.String())
-	close(ci.stopCh)
+	ci.stopOnce.Do(func() {
+		log.Printf("Stopping informers for cluster %s", ci.clusterID.String())
+		close(ci.stopCh)
+	})
 }
 
 // handleNodeAdd 处理节点添加事件

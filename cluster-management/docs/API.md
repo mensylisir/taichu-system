@@ -505,40 +505,24 @@
 
 ## 备份接口
 
-### 注册etcd配置
+### 备份概述
 
-**接口地址**: `POST /api/v1/clusters/{id}/etcd/config`
+太初集群管理系统提供三种备份类型：
+- **etcd备份**：备份etcd集群的数据快照，用于恢复集群状态
+- **资源备份**：备份Kubernetes资源（Deployment、Service、ConfigMap等）
+- **完整备份**：同时备份etcd和资源
 
-**认证**: 需要JWT令牌
+**备份工作原理**：
+- 备份执行是异步的，创建备份后立即返回备份ID
+- etcd备份通过SSH连接到etcd节点，执行`etcdctl snapshot save`命令
+- 系统会自动从备份计划中获取etcd配置（endpoints、证书、SSH凭证等）
+- 备份文件存储在服务器的`/backups`目录下
 
-**路径参数**:
-- `id`: 集群ID
-
-**请求体**:
-```json
-{
-  "endpoints": "https://172.30.1.12:2379,https://172.30.1.14:2379,https://172.30.1.15:2379",
-  "ca_cert": "/etc/ssl/etcd/ssl/ca.pem",
-  "cert": "/etc/ssl/etcd/ssl/admin-node2.pem",
-  "key": "/etc/ssl/etcd/ssl/admin-node2-key.pem",
-  "etcdctl_path": "/usr/local/bin/etcdctl",
-  "ssh_username": "root",
-  "ssh_password": "password"
-}
-```
-
----
-
-### 获取etcd配置
-
-**接口地址**: `GET /api/v1/clusters/{id}/etcd/config`
-
-**认证**: 需要JWT令牌
-
-**路径参数**:
-- `id`: 集群ID
-
----
+**备份状态**：
+- `pending`：备份已创建，等待执行
+- `running`：备份正在执行中
+- `completed`：备份成功完成
+- `failed`：备份失败，可查看`error_message`字段了解错误详情
 
 ### 创建etcd备份（独立接口）
 
@@ -558,6 +542,11 @@
 }
 ```
 
+**请求参数说明**:
+- `backup_name`: 备份名称（必填）
+- `backup_type`: 备份类型，固定为"etcd"（必填）
+- `retention_days`: 保留天数（可选，默认30天）
+
 **响应示例**:
 ```json
 {
@@ -565,14 +554,25 @@
   "message": "success",
   "data": {
     "id": "550e8400-e29b-41d4-a716-446655440000",
+    "cluster_id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "etcd-backup-20250101",
     "backup_name": "etcd-backup-20250101",
     "backup_type": "etcd",
     "status": "pending",
-    "storage_location": "/backups/cluster1/etcd-backup-20250101",
-    "snapshot_timestamp": "2025-01-01T00:00:00Z"
+    "storage_location": "\\backups\\550e8400-e29b-41d4-a716-446655440001\\etcd-backup-20250101\\20250101-120000",
+    "retention_days": 30,
+    "created_by": "system",
+    "snapshot_timestamp": "2025-01-01T00:00:00Z",
+    "created_at": "2025-01-01T00:00:00Z"
   }
 }
 ```
+
+**说明**:
+- 备份执行是异步的，创建后状态为"pending"
+- 系统会自动从备份计划中获取etcd配置（endpoints、证书、SSH凭证等）
+- 备份会在集群的etcd节点上通过SSH执行etcdctl snapshot save命令
+- 备份完成后状态会更新为"completed"，失败则更新为"failed"
 
 ---
 
@@ -594,6 +594,11 @@
 }
 ```
 
+**请求参数说明**:
+- `backup_name`: 备份名称（必填）
+- `backup_type`: 备份类型，固定为"resources"（必填）
+- `retention_days`: 保留天数（可选，默认30天）
+
 **响应示例**:
 ```json
 {
@@ -601,14 +606,23 @@
   "message": "success",
   "data": {
     "id": "550e8400-e29b-41d4-a716-446655440001",
+    "cluster_id": "550e8400-e29b-41d4-a716-446655440002",
     "backup_name": "resources-backup-20250101",
     "backup_type": "resources",
     "status": "pending",
-    "storage_location": "/backups/cluster1/resources-backup-20250101",
-    "snapshot_timestamp": "2025-01-01T00:00:00Z"
+    "storage_location": "\\backups\\550e8400-e29b-41d4-a716-446655440002\\resources-backup-20250101\\20250101-120000",
+    "retention_days": 30,
+    "created_by": "system",
+    "snapshot_timestamp": "2025-01-01T00:00:00Z",
+    "created_at": "2025-01-01T00:00:00Z"
   }
 }
 ```
+
+**说明**:
+- 备份执行是异步的，创建后状态为"pending"
+- 资源备份会备份集群中的所有Kubernetes资源（如Deployment、Service、ConfigMap等）
+- 备份完成后状态会更新为"completed"，失败则更新为"failed"
 
 ---
 
@@ -658,9 +672,11 @@
         "backup_name": "etcd-backup-20250101",
         "backup_type": "etcd",
         "status": "completed",
-        "storage_location": "/backups/cluster1/etcd-backup-20250101",
+        "storage_location": "\\backups\\550e8400-e29b-41d4-a716-446655440001\\etcd-backup-20250101\\20250101-120000",
         "storage_size_bytes": 894709792,
-        "snapshot_timestamp": "2025-01-01T00:00:00Z"
+        "snapshot_timestamp": "2025-01-01T00:00:00Z",
+        "created_at": "2025-01-01T00:00:00Z",
+        "completed_at": "2025-01-01T00:05:00Z"
       }
     ],
     "total": 1
@@ -757,6 +773,34 @@
 **路径参数**:
 - `id`: 集群ID
 - `backupId`: 备份ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "cluster_id": "550e8400-e29b-41d4-a716-446655440001",
+    "backup_name": "etcd-backup-20250101",
+    "backup_type": "etcd",
+    "status": "completed",
+    "storage_location": "\\backups\\550e8400-e29b-41d4-a716-446655440001\\etcd-backup-20250101\\20250101-120000",
+    "storage_size_bytes": 894709792,
+    "snapshot_timestamp": "2025-01-01T00:00:00Z",
+    "retention_days": 30,
+    "created_at": "2025-01-01T00:00:00Z",
+    "completed_at": "2025-01-01T00:05:00Z",
+    "error_message": ""
+  }
+}
+```
+
+**备份状态说明**:
+- `pending`: 备份已创建，等待执行
+- `running`: 备份正在执行中
+- `completed`: 备份成功完成
+- `failed`: 备份失败，可查看`error_message`字段了解错误详情
 
 ---
 
@@ -857,18 +901,32 @@
 {
   "code": 0,
   "message": "success",
-  "data": {
-    "schedules": [
-      {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "name": "daily-backup",
-        "cron_expr": "0 2 * * *",
-        "backup_type": "full",
-        "retention_days": 7,
-        "enabled": true
-      }
-    ]
-  }
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "cluster_id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "daily-backup",
+      "schedule_name": "daily-backup",
+      "cron_expr": "0 2 * * *",
+      "cron_expression": "0 2 * * *",
+      "backup_type": "etcd",
+      "retention_days": 7,
+      "retention_count": 7,
+      "enabled": true,
+      "created_by": "admin",
+      "etcd_endpoints": "https://172.30.1.12:2379,https://172.30.1.14:2379,https://172.30.1.15:2379",
+      "etcd_ca_cert": "/etc/ssl/etcd/ssl/ca.pem",
+      "etcd_cert": "/etc/ssl/etcd/ssl/admin-node2.pem",
+      "etcd_key": "/etc/ssl/etcd/ssl/admin-node2-key.pem",
+      "etcd_data_dir": "/var/lib/etcd",
+      "etcdctl_path": "/usr/local/bin/etcdctl",
+      "ssh_username": "root",
+      "ssh_password": "password",
+      "etcd_deployment_type": "standalone",
+      "k8s_deployment_type": "kubeadm",
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  ]
 }
 ```
 
@@ -886,13 +944,79 @@
 **请求体**:
 ```json
 {
-  "name": "string",
+  "name": "daily-backup",
   "cron_expr": "0 2 * * *",
-  "backup_type": "full",
+  "backup_type": "etcd",
   "retention_days": 7,
-  "enabled": true
+  "enabled": true,
+  "created_by": "admin",
+  "etcd_endpoints": "https://172.30.1.12:2379,https://172.30.1.14:2379,https://172.30.1.15:2379",
+  "etcd_ca_cert": "/etc/ssl/etcd/ssl/ca.pem",
+  "etcd_cert": "/etc/ssl/etcd/ssl/admin-node2.pem",
+  "etcd_key": "/etc/ssl/etcd/ssl/admin-node2-key.pem",
+  "etcd_data_dir": "/var/lib/etcd",
+  "etcdctl_path": "/usr/local/bin/etcdctl",
+  "ssh_username": "root",
+  "ssh_password": "password",
+  "etcd_deployment_type": "standalone",
+  "k8s_deployment_type": "kubeadm"
 }
 ```
+
+**请求参数说明**:
+- `name`: 备份计划名称（必填）
+- `cron_expr`: Cron表达式，定义备份执行时间（必填）
+- `backup_type`: 备份类型，可选值："etcd"、"resources"、"full"（必填）
+- `retention_days`: 保留天数（可选，默认7天）
+- `enabled`: 是否启用（可选，默认true）
+- `created_by`: 创建者用户名（必填）
+- `etcd_endpoints`: etcd端点地址，多个端点用逗号分隔（可选，etcd备份必填）
+- `etcd_ca_cert`: etcd CA证书路径（可选，etcd备份必填）
+- `etcd_cert`: etcd客户端证书路径（可选，etcd备份必填）
+- `etcd_key`: etcd客户端密钥路径（可选，etcd备份必填）
+- `etcd_data_dir`: etcd数据目录（可选）
+- `etcdctl_path`: etcdctl命令路径（可选，默认"/usr/local/bin/etcdctl"）
+- `ssh_username`: SSH用户名（可选，etcd备份必填）
+- `ssh_password`: SSH密码（可选，etcd备份必填）
+- `etcd_deployment_type`: etcd部署类型（可选）
+- `k8s_deployment_type`: Kubernetes部署类型（可选）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "cluster_id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "daily-backup",
+    "schedule_name": "daily-backup",
+    "cron_expr": "0 2 * * *",
+    "cron_expression": "0 2 * * *",
+    "backup_type": "etcd",
+    "retention_days": 7,
+    "retention_count": 7,
+    "enabled": true,
+    "created_by": "admin",
+    "etcd_endpoints": "https://172.30.1.12:2379,https://172.30.1.14:2379,https://172.30.1.15:2379",
+    "etcd_ca_cert": "/etc/ssl/etcd/ssl/ca.pem",
+    "etcd_cert": "/etc/ssl/etcd/ssl/admin-node2.pem",
+    "etcd_key": "/etc/ssl/etcd/ssl/admin-node2-key.pem",
+    "etcd_data_dir": "/var/lib/etcd",
+    "etcdctl_path": "/usr/local/bin/etcdctl",
+    "ssh_username": "root",
+    "ssh_password": "password",
+    "etcd_deployment_type": "standalone",
+    "k8s_deployment_type": "kubeadm",
+    "created_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+**说明**:
+- 备份计划创建后会根据cron表达式自动执行备份
+- etcd备份需要提供etcd相关配置（endpoints、证书、SSH凭证等）
+- 系统会自动从endpoints中解析etcd节点IP，选择其中一个节点执行备份
 
 ---
 
@@ -905,6 +1029,53 @@
 **路径参数**:
 - `id`: 集群ID
 - `scheduleId`: 计划ID
+
+**请求体**:
+```json
+{
+  "cron_expr": "0 3 * * *",
+  "backup_type": "etcd",
+  "retention_days": 14,
+  "enabled": true,
+  "etcd_endpoints": "https://172.30.1.12:2379,https://172.30.1.14:2379,https://172.30.1.15:2379",
+  "etcd_ca_cert": "/etc/ssl/etcd/ssl/ca.pem",
+  "etcd_cert": "/etc/ssl/etcd/ssl/admin-node2.pem",
+  "etcd_key": "/etc/ssl/etcd/ssl/admin-node2-key.pem",
+  "etcd_data_dir": "/var/lib/etcd",
+  "etcdctl_path": "/usr/local/bin/etcdctl",
+  "ssh_username": "root",
+  "ssh_password": "password",
+  "etcd_deployment_type": "standalone",
+  "k8s_deployment_type": "kubeadm"
+}
+```
+
+**请求参数说明**:
+- `cron_expr`: Cron表达式，定义备份执行时间（可选）
+- `backup_type`: 备份类型，可选值："etcd"、"resources"、"full"（可选）
+- `retention_days`: 保留天数（可选）
+- `enabled`: 是否启用（可选）
+- `etcd_endpoints`: etcd端点地址，多个端点用逗号分隔（可选）
+- `etcd_ca_cert`: etcd CA证书路径（可选）
+- `etcd_cert`: etcd客户端证书路径（可选）
+- `etcd_key`: etcd客户端密钥路径（可选）
+- `etcd_data_dir`: etcd数据目录（可选）
+- `etcdctl_path`: etcdctl命令路径（可选）
+- `ssh_username`: SSH用户名（可选）
+- `ssh_password`: SSH密码（可选）
+- `etcd_deployment_type`: etcd部署类型（可选）
+- `k8s_deployment_type`: Kubernetes部署类型（可选）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "message": "Backup schedule updated successfully"
+  }
+}
+```
 
 ---
 

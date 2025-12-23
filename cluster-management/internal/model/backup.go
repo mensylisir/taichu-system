@@ -61,6 +61,10 @@ type BackupSchedule struct {
 	EtcdctlPath   string `json:"etcdctl_path" gorm:"size:255;default:'/usr/bin/etcdctl'"`
 	SshUsername   string `json:"ssh_username" gorm:"size:255;default:'root'"`
 	SshPassword   string `json:"ssh_password" gorm:"size:255"`
+
+	// 部署方式配置
+	EtcdDeploymentType string `json:"etcd_deployment_type" gorm:"size:50;default:'kubexm'"`
+	K8sDeploymentType string `json:"k8s_deployment_type" gorm:"size:50;default:'kubeadm'"`
 }
 
 func (BackupSchedule) TableName() string {

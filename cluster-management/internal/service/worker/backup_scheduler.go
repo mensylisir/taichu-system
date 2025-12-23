@@ -22,6 +22,7 @@ type BackupScheduler struct {
 	wg                 sync.WaitGroup
 	ctx                context.Context
 	cancel             context.CancelFunc
+	runningBackups     sync.Map
 }
 
 func NewBackupScheduler(
@@ -63,6 +64,13 @@ func (s *BackupScheduler) Stop() {
 	log.Println("Stopping backup scheduler...")
 	s.cancel()
 	s.cron.Stop()
+
+	s.runningBackups.Range(func(key, value interface{}) bool {
+		backupID := key.(string)
+		log.Printf("Waiting for backup %s to complete...", backupID)
+		return true
+	})
+
 	s.wg.Wait()
 	log.Println("Backup scheduler stopped")
 }
@@ -98,14 +106,12 @@ func (s *BackupScheduler) addSchedule(schedule *model.BackupSchedule) {
 func (s *BackupScheduler) executeBackupSchedule(schedule *model.BackupSchedule) {
 	log.Printf("Executing backup schedule: %s", schedule.Name)
 
-	// 更新最后运行时间
 	now := time.Now()
 	schedule.LastRunAt = &now
 	if err := s.backupScheduleRepo.Update(schedule); err != nil {
 		log.Printf("Failed to update last run time: %v", err)
 	}
 
-	// 创建备份
 	backupName := fmt.Sprintf("%s-%s", schedule.Name, now.Format("20060102-150405"))
 	backup, err := s.backupService.CreateBackup(
 		schedule.ClusterID.String(),
@@ -118,12 +124,14 @@ func (s *BackupScheduler) executeBackupSchedule(schedule *model.BackupSchedule) 
 		return
 	}
 
-	// 异步执行备份
+	s.runningBackups.Store(backup.ID.String(), struct{}{})
 	go func() {
+		defer s.runningBackups.Delete(backup.ID.String())
+
 		if err := s.backupService.ExecuteBackup(backup.ID.String()); err != nil {
-			log.Printf("Failed to execute backup %s: %v", backup.ID, err)
+			log.Printf("Failed to execute backup %s for schedule %s: %v", backup.ID, schedule.Name, err)
 		} else {
-			log.Printf("Backup %s completed successfully", backup.ID)
+			log.Printf("Backup %s for schedule %s completed successfully", backup.ID, schedule.Name)
 		}
 	}()
 

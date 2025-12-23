@@ -60,7 +60,6 @@ func (w *HealthCheckWorker) Stop() {
 	log.Println("Stopping health check worker...")
 	w.cancel()
 	w.wg.Wait()
-	close(w.sem)
 }
 
 func (w *HealthCheckWorker) scheduler() {

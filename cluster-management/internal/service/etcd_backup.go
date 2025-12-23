@@ -8,10 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
-
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // EtcdBackupConfig etcd备份配置
@@ -132,57 +129,6 @@ func (s *EtcdBackupService) VerifySnapshot(ctx context.Context, snapshotPath str
 	}
 
 	return nil
-}
-
-// GetEtcdConfigFromKubeconfig 从kubeconfig获取etcd配置
-func (s *EtcdBackupService) GetEtcdConfigFromKubeconfig(ctx context.Context, kubeconfig string) (*EtcdBackupConfig, error) {
-	// 解析kubeconfig
-	config, err := clientcmd.Load([]byte(kubeconfig))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
-	}
-
-	// 获取当前上下文
-	contextName := config.CurrentContext
-	if contextName == "" {
-		return nil, fmt.Errorf("no current context in kubeconfig")
-	}
-
-	contextConfig, ok := config.Contexts[contextName]
-	if !ok {
-		return nil, fmt.Errorf("context %s not found", contextName)
-	}
-
-	clusterConfig, ok := config.Clusters[contextConfig.Cluster]
-	if !ok {
-		return nil, fmt.Errorf("cluster %s not found", contextConfig.Cluster)
-	}
-
-	// 构建etcd配置
-	// 注意：这里需要根据实际集群配置调整
-	etcdConfig := &EtcdBackupConfig{
-		Endpoint: "https://127.0.0.1:2379", // 默认etcd端点
-		CAFile:   "/etc/kubernetes/pki/etcd/ca.crt",
-		CertFile: "/etc/kubernetes/pki/etcd/server.crt",
-		KeyFile:  "/etc/kubernetes/pki/etcd/server.key",
-		DataDir:  "/var/lib/etcd",
-		Timeout:  30 * time.Second,
-	}
-
-	// 如果kubeconfig中有server地址，优先使用
-	if clusterConfig.Server != "" {
-		// 提取etcd端点（假设使用默认端口2379）
-		// 实际中可能需要从集群配置中获取
-		etcdConfig.Endpoint = clusterConfig.Server
-		if !strings.Contains(etcdConfig.Endpoint, ":") {
-			etcdConfig.Endpoint = etcdConfig.Endpoint + ":2379"
-		}
-	}
-
-	// TODO: 实际实现中需要从集群中获取证书文件路径
-	// 这里使用默认路径，实际中可能需要通过SSH或其他方式获取
-
-	return etcdConfig, nil
 }
 
 // StopControlPlaneComponents 停止控制平面组件

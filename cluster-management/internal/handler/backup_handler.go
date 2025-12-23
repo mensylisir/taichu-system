@@ -11,8 +11,9 @@ import (
 )
 
 type BackupHandler struct {
-	backupService *service.BackupService
-	auditService  *service.AuditService
+	backupService  *service.BackupService
+	restoreService *service.RestoreService
+	auditService   *service.AuditService
 }
 
 type CreateBackupRequest struct {
@@ -65,20 +66,6 @@ type RestoreProgressResponse struct {
 	EstimatedTime int     `json:"estimated_time,omitempty"`
 }
 
-type RegisterEtcdConfigRequest struct {
-	Nodes []EtcdNodeInfo `json:"nodes"`
-}
-
-type EtcdNodeInfo struct {
-	IP        string   `json:"ip"`
-	Port      int      `json:"port"`
-	CACert    string   `json:"cacert"`
-	Cert      string   `json:"cert"`
-	Key       string   `json:"key"`
-	DataDir   string   `json:"data_dir"`
-	Endpoints []string `json:"endpoints"`
-}
-
 type CreateBackupScheduleRequest struct {
 	Name          string `json:"name" binding:"required"`
 	CronExpr      string `json:"cron_expr" binding:"required"`
@@ -96,6 +83,10 @@ type CreateBackupScheduleRequest struct {
 	EtcdctlPath   string `json:"etcdctl_path"`
 	SshUsername   string `json:"ssh_username"`
 	SshPassword   string `json:"ssh_password"`
+
+	// 部署方式配置
+	EtcdDeploymentType string `json:"etcd_deployment_type"`
+	K8sDeploymentType  string `json:"k8s_deployment_type"`
 }
 
 type UpdateBackupScheduleRequest struct {
@@ -113,6 +104,10 @@ type UpdateBackupScheduleRequest struct {
 	EtcdctlPath   string `json:"etcdctl_path"`
 	SshUsername   string `json:"ssh_username"`
 	SshPassword   string `json:"ssh_password"`
+
+	// 部署方式配置
+	EtcdDeploymentType string `json:"etcd_deployment_type"`
+	K8sDeploymentType  string `json:"k8s_deployment_type"`
 }
 
 // CreateEtcdBackupRequest etcd备份请求
@@ -129,10 +124,11 @@ type CreateResourceBackupRequest struct {
 	RetentionDays int    `json:"retention_days"`
 }
 
-func NewBackupHandler(backupService *service.BackupService, auditService *service.AuditService) *BackupHandler {
+func NewBackupHandler(backupService *service.BackupService, restoreService *service.RestoreService, auditService *service.AuditService) *BackupHandler {
 	return &BackupHandler{
-		backupService: backupService,
-		auditService:  auditService,
+		backupService:  backupService,
+		restoreService: restoreService,
+		auditService:   auditService,
 	}
 }
 
@@ -159,17 +155,20 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 
 	go h.backupService.ExecuteBackup(backup.ID.String())
 
-	// 记录审计日志
+	user := getUsernameFromContext(c)
+	if user == "" {
+		user = "system"
+	}
+
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
 		h.auditService.LogBackupOperation(
 			id,
 			"create",
 			backup.ID.String(),
 			user,
 			map[string]interface{}{
-				"backup_name":   req.BackupName,
-				"backup_type":   req.BackupType,
+				"backup_name":    req.BackupName,
+				"backup_type":    req.BackupType,
 				"retention_days": req.RetentionDays,
 			},
 		)
@@ -201,17 +200,20 @@ func (h *BackupHandler) CreateEtcdBackup(c *gin.Context) {
 
 	go h.backupService.ExecuteEtcdBackup(backup.ID.String())
 
-	// 记录审计日志
+	user := getUsernameFromContext(c)
+	if user == "" {
+		user = "system"
+	}
+
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
 		h.auditService.LogBackupOperation(
 			id,
 			"create_etcd",
 			backup.ID.String(),
 			user,
 			map[string]interface{}{
-				"backup_name":   req.BackupName,
-				"backup_type":   req.BackupType,
+				"backup_name":    req.BackupName,
+				"backup_type":    req.BackupType,
 				"retention_days": req.RetentionDays,
 			},
 		)
@@ -243,17 +245,20 @@ func (h *BackupHandler) CreateResourceBackup(c *gin.Context) {
 
 	go h.backupService.ExecuteResourceBackup(backup.ID.String())
 
-	// 记录审计日志
+	user := getUsernameFromContext(c)
+	if user == "" {
+		user = "system"
+	}
+
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
 		h.auditService.LogBackupOperation(
 			id,
 			"create_resource",
 			backup.ID.String(),
 			user,
 			map[string]interface{}{
-				"backup_name":   req.BackupName,
-				"backup_type":   req.BackupType,
+				"backup_name":    req.BackupName,
+				"backup_type":    req.BackupType,
 				"retention_days": req.RetentionDays,
 			},
 		)
@@ -375,15 +380,18 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		return
 	}
 
-	restoreID, err := h.backupService.RestoreBackup(clusterUUID.String(), backupUUID.String(), req.RestoreName)
+	restoreID, err := h.restoreService.RestoreBackup(clusterUUID.String(), backupUUID.String(), req.RestoreName)
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to restore backup: %v", err)
 		return
 	}
 
-	// 记录审计日志
+	user := getUsernameFromContext(c)
+	if user == "" {
+		user = "system"
+	}
+
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
 		h.auditService.LogBackupOperation(
 			clusterUUID,
 			"restore",
@@ -424,9 +432,12 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 		return
 	}
 
-	// 记录审计日志
+	user := getUsernameFromContext(c)
+	if user == "" {
+		user = "system"
+	}
+
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
 		h.auditService.LogBackupOperation(
 			clusterUUID,
 			"delete",
@@ -470,7 +481,7 @@ func (h *BackupHandler) GetRestoreProgress(c *gin.Context) {
 		return
 	}
 
-	progress, err := h.backupService.GetRestoreProgress(restoreUUID.String())
+	progress, err := h.restoreService.GetRestoreProgress(restoreUUID.String())
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to get restore progress: %v", err)
 		return
@@ -486,49 +497,6 @@ func (h *BackupHandler) GetRestoreProgress(c *gin.Context) {
 	}
 
 	utils.Success(c, http.StatusOK, response)
-}
-
-func (h *BackupHandler) RegisterEtcdConfig(c *gin.Context) {
-	var req RegisterEtcdConfigRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
-		return
-	}
-
-	// 转换为service层的结构
-	serviceConfig := &service.EtcdNodeConfig{
-		Nodes: make([]service.EtcdNodeInfo, len(req.Nodes)),
-	}
-
-	for i, node := range req.Nodes {
-		serviceConfig.Nodes[i] = service.EtcdNodeInfo{
-			IP:        node.IP,
-			Port:      node.Port,
-			CACert:    node.CACert,
-			Cert:      node.Cert,
-			Key:       node.Key,
-			DataDir:   node.DataDir,
-			Endpoints: node.Endpoints,
-		}
-	}
-
-	// 注册配置
-	h.backupService.RegisterEtcdConfig(serviceConfig)
-
-	utils.Success(c, http.StatusOK, gin.H{
-		"message": "etcd config registered successfully",
-		"nodes":   len(serviceConfig.Nodes),
-	})
-}
-
-func (h *BackupHandler) GetEtcdConfig(c *gin.Context) {
-	config := h.backupService.GetEtcdConfig()
-	if config == nil {
-		utils.Error(c, http.StatusNotFound, "etcd config not registered")
-		return
-	}
-
-	utils.Success(c, http.StatusOK, config)
 }
 
 func (h *BackupHandler) CreateBackupSchedule(c *gin.Context) {
@@ -553,55 +521,21 @@ func (h *BackupHandler) CreateBackupSchedule(c *gin.Context) {
 		req.BackupType,
 		req.RetentionDays,
 		req.Enabled,
+		req.EtcdEndpoints,
+		req.EtcdCaCert,
+		req.EtcdCert,
+		req.EtcdKey,
+		req.EtcdDataDir,
+		req.EtcdctlPath,
+		req.SshUsername,
+		req.SshPassword,
+		req.EtcdDeploymentType,
+		req.K8sDeploymentType,
+		req.CreatedBy,
 	)
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to create backup schedule: %v", err)
 		return
-	}
-
-	// etcd配置直接存储在schedule对象中
-	if req.EtcdEndpoints != "" {
-		schedule.EtcdEndpoints = req.EtcdEndpoints
-	}
-	if req.EtcdCaCert != "" {
-		schedule.EtcdCaCert = req.EtcdCaCert
-	}
-	if req.EtcdCert != "" {
-		schedule.EtcdCert = req.EtcdCert
-	}
-	if req.EtcdKey != "" {
-		schedule.EtcdKey = req.EtcdKey
-	}
-	if req.EtcdDataDir != "" {
-		schedule.EtcdDataDir = req.EtcdDataDir
-	}
-	if req.EtcdctlPath != "" {
-		schedule.EtcdctlPath = req.EtcdctlPath
-	}
-	if req.SshUsername != "" {
-		schedule.SshUsername = req.SshUsername
-	}
-	if req.SshPassword != "" {
-		schedule.SshPassword = req.SshPassword
-	}
-
-	// 保存etcd配置到数据库
-	if req.EtcdEndpoints != "" || req.EtcdCaCert != "" || req.EtcdCert != "" || req.EtcdKey != "" {
-		err = h.backupService.UpdateEtcdConfig(
-			schedule.ID.String(),
-			req.EtcdEndpoints,
-			req.EtcdCaCert,
-			req.EtcdCert,
-			req.EtcdKey,
-			req.EtcdDataDir,
-			req.EtcdctlPath,
-			req.SshUsername,
-			req.SshPassword,
-		)
-		if err != nil {
-			utils.Error(c, http.StatusInternalServerError, "Failed to save etcd config: %v", err)
-			return
-		}
 	}
 
 	utils.Success(c, http.StatusOK, schedule)
@@ -628,19 +562,20 @@ func (h *BackupHandler) UpdateBackupSchedule(c *gin.Context) {
 		req.BackupType,
 		req.RetentionDays,
 		req.Enabled,
+		req.EtcdEndpoints,
+		req.EtcdCaCert,
+		req.EtcdCert,
+		req.EtcdKey,
+		req.EtcdDataDir,
+		req.EtcdctlPath,
+		req.SshUsername,
+		req.SshPassword,
+		req.EtcdDeploymentType,
+		req.K8sDeploymentType,
 	)
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to update backup schedule: %v", err)
 		return
-	}
-
-	// 如果提供了etcd配置，更新到数据库
-	if req.EtcdEndpoints != "" || req.EtcdCaCert != "" || req.EtcdCert != "" || req.EtcdKey != "" {
-		err = h.backupService.UpdateEtcdConfig(scheduleUUID.String(), req.EtcdEndpoints, req.EtcdCaCert, req.EtcdCert, req.EtcdKey, req.EtcdDataDir, req.EtcdctlPath, req.SshUsername, req.SshPassword)
-		if err != nil {
-			utils.Error(c, http.StatusInternalServerError, "Failed to update etcd config: %v", err)
-			return
-		}
 	}
 
 	utils.Success(c, http.StatusOK, gin.H{
@@ -666,4 +601,13 @@ func (h *BackupHandler) DeleteBackupSchedule(c *gin.Context) {
 	utils.Success(c, http.StatusOK, gin.H{
 		"message": "Backup schedule deleted successfully",
 	})
+}
+
+func getUsernameFromContext(c *gin.Context) string {
+	if username, exists := c.Get("username"); exists {
+		if usernameStr, ok := username.(string); ok {
+			return usernameStr
+		}
+	}
+	return ""
 }

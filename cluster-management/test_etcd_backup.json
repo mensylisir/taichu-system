@@ -1,0 +1,5 @@
+{
+  "backup_name": "test-etcd-backup",
+  "backup_type": "etcd",
+  "retention_days": 7
+}

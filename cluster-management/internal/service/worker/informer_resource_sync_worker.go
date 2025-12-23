@@ -220,12 +220,13 @@ func (w *InformerResourceSyncWorker) addClusterInformer(cluster model.Cluster) {
 
 	// 创建 Informer
 	informer, err := NewClusterInformer(
+		w.ctx,
 		cluster.ID,
 		kubeconfig,
 		w.nodeRepo,
 		w.eventRepo,
 		w.clusterResourceRepo,
-		w.cache, // 传递缓存
+		w.cache,
 	)
 	if err != nil {
 		log.Printf("Failed to create informer for cluster %s: %v", cluster.Name, err)

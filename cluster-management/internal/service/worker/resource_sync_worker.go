@@ -81,7 +81,6 @@ func (w *ResourceSyncWorker) Stop() {
 	log.Println("Stopping resource sync worker...")
 	w.cancel()
 	w.wg.Wait()
-	close(w.sem)
 }
 
 func (w *ResourceSyncWorker) scheduler() {
