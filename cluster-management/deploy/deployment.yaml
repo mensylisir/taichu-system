@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: api-server
-        image: registry.dev.rdev.tech:18093/taichu/cluster-management:v6.0.0
+        image: registry.dev.rdev.tech:18093/taichu/cluster-management:v7.0.0
         imagePullPolicy: Always
         ports:
         - name: http
@@ -79,6 +79,8 @@ spec:
           readOnly: true
         - name: logs-volume
           mountPath: /app/logs
+        - mountPath: /backups
+          name: backup-dir
         livenessProbe:
           httpGet:
             path: /api/v1/auth/token
@@ -102,13 +104,15 @@ spec:
           capabilities:
             drop:
             - ALL
-          readOnlyRootFilesystem: true
+          readOnlyRootFilesystem: false
       volumes:
       - name: config-volume
         configMap:
           name: taichu-cluster-management-config
       - name: logs-volume
         emptyDir: {}
+      - emptyDir: {}
+        name: backup-dir
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
 ---

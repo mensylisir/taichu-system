@@ -1,5 +1,0 @@
-{
-  "backup_name": "test-full-backup",
-  "backup_type": "full",
-  "retention_days": 7
-}

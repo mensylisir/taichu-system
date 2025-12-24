@@ -1,5 +1,0 @@
-{
-  "backup_name": "test-resource-backup",
-  "backup_type": "resource",
-  "retention_days": 7
-}
