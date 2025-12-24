@@ -2,6 +2,7 @@ package routes
 
 import (
 	"infra-management/internal/api"
+	"infra-management/internal/ssh"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,4 +24,13 @@ func SetupRoutes(router *gin.Engine, apiHandler *api.Handler) {
 		v1.DELETE("/storages/:name", apiHandler.DeleteStorage)
 		v1.DELETE("/firewall-rules/:name", apiHandler.DeleteFirewallRule)
 	}
+
+	// WebSocket SSH终端路由
+	wsHandler := ssh.NewWebSocketSSHHandler()
+	router.GET("/ws/ssh", func(c *gin.Context) {
+		wsHandler.HandleWebSocket(c.Writer, c.Request)
+	})
+
+	// 设置静态文件服务（用于前端终端页面）
+	router.Static("/terminal", "./static/terminal")
 }
