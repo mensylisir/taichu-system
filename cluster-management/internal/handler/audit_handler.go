@@ -1,14 +1,15 @@
 package handler
 
 import (
-	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/repository"
 	"github.com/taichu-system/cluster-management/internal/service"
+	internalutils "github.com/taichu-system/cluster-management/internal/utils"
 	"github.com/taichu-system/cluster-management/pkg/utils"
 )
 
@@ -17,18 +18,18 @@ type AuditHandler struct {
 }
 
 type AuditEventResponse struct {
-	ID         uuid.UUID `json:"id"`
-	EventType  string    `json:"event_type"`
-	Action     string    `json:"action"`
-	Resource   string    `json:"resource"`
-	ResourceID string    `json:"resource_id"`
-	User       string    `json:"user"`
-	IPAddress  string    `json:"ip_address"`
+	ID         uuid.UUID              `json:"id"`
+	EventType  string                 `json:"event_type"`
+	Action     string                 `json:"action"`
+	Resource   string                 `json:"resource"`
+	ResourceID string                 `json:"resource_id"`
+	User       string                 `json:"user"`
+	IPAddress  string                 `json:"ip_address"`
 	OldValue   map[string]interface{} `json:"old_value,omitempty"`
 	NewValue   map[string]interface{} `json:"new_value,omitempty"`
 	Details    map[string]interface{} `json:"details,omitempty"`
-	Result     string    `json:"result"`
-	Timestamp  string    `json:"timestamp"`
+	Result     string                 `json:"result"`
+	Timestamp  string                 `json:"timestamp"`
 }
 
 type AuditListResponse struct {
@@ -47,9 +48,9 @@ func NewAuditHandler(auditService *service.AuditService) *AuditHandler {
 func (h *AuditHandler) ListAuditEvents(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := internalutils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, internalutils.ErrCodeInvalidInput, "Invalid cluster ID")
 		return
 	}
 
@@ -96,7 +97,7 @@ func (h *AuditHandler) ListAuditEvents(c *gin.Context) {
 
 	events, total, err := h.auditService.GetAuditLogs(id, params)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to get audit events: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to get audit events: %v", err)
 		return
 	}
 
@@ -125,7 +126,7 @@ func (h *AuditHandler) ListAuditEvents(c *gin.Context) {
 		Limit:  limit,
 	}
 
-	utils.Success(c, http.StatusOK, response)
+	utils.Success(c, 200, response)
 }
 
 // ListAllAuditEvents 获取所有审计日志（全局）
@@ -171,10 +172,9 @@ func (h *AuditHandler) ListAllAuditEvents(c *gin.Context) {
 		}
 	}
 
-	// 使用 uuid.Nil 表示查询所有集群的审计日志
 	events, total, err := h.auditService.GetAuditLogs(uuid.Nil, params)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to get audit events: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to get audit events: %v", err)
 		return
 	}
 
@@ -203,7 +203,7 @@ func (h *AuditHandler) ListAllAuditEvents(c *gin.Context) {
 		Limit:  limit,
 	}
 
-	utils.Success(c, http.StatusOK, response)
+	utils.Success(c, 200, response)
 }
 
 // CreateAuditEventRequest 创建审计事件请求
@@ -228,21 +228,20 @@ type CreateAuditEventRequest struct {
 func (h *AuditHandler) CreateAuditEvent(c *gin.Context) {
 	var req CreateAuditEventRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, internalutils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
 	var clusterID uuid.UUID
 	if req.ClusterID != "" {
 		var err error
-		clusterID, err = uuid.Parse(req.ClusterID)
+		clusterID, err = internalutils.ParseUUID(req.ClusterID)
 		if err != nil {
-			utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+			utils.Error(c, internalutils.ErrCodeInvalidInput, "Invalid cluster ID")
 			return
 		}
 	}
 
-	// 解析时间戳
 	var timestamp time.Time
 	if req.Timestamp != "" {
 		var err error
@@ -259,7 +258,7 @@ func (h *AuditHandler) CreateAuditEvent(c *gin.Context) {
 
 	result := req.Result
 	if result == "" {
-		result = "success"
+		result = constants.StatusSuccess
 	}
 
 	err := h.auditService.CreateAuditEventWithTimestamp(
@@ -278,11 +277,11 @@ func (h *AuditHandler) CreateAuditEvent(c *gin.Context) {
 		timestamp,
 	)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to create audit event: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to create audit event: %v", err)
 		return
 	}
 
-	utils.Success(c, http.StatusCreated, gin.H{"message": "Audit event created successfully"})
+	utils.Success(c, 200, gin.H{"message": "Audit event created successfully"})
 }
 
 func convertJSONMap(j map[string]interface{}) map[string]interface{} {

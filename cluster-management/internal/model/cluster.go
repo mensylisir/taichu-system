@@ -162,4 +162,13 @@ func (j *JSONMap) Delete(key string) {
 	}
 	delete(*j, key)
 }
+
+// ParseUUID 解析UUID字符串为uuid.UUID
+func ParseUUID(id string) uuid.UUID {
+	parsedUUID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.UUID{}
+	}
+	return parsedUUID
+}
 

@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/taichu-system/cluster-management/internal/service"
 	"github.com/taichu-system/cluster-management/pkg/utils"
 )
@@ -40,15 +39,15 @@ func NewSecurityPolicyHandler(securityPolicyService *service.SecurityPolicyServi
 func (h *SecurityPolicyHandler) GetSecurityPolicy(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeInvalidInput, "Invalid cluster ID")
 		return
 	}
 
 	policy, err := h.securityPolicyService.GetSecurityPolicy(c.Request.Context(), id.String())
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Security policy not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Security policy not found")
 		return
 	}
 
@@ -60,13 +59,12 @@ func (h *SecurityPolicyHandler) GetSecurityPolicy(c *gin.Context) {
 		RBACRolesCount:          policy.RBACRolesCount,
 		AuditLoggingEnabled:     policy.AuditLoggingEnabled,
 		AuditLoggingMode:        policy.AuditLoggingMode,
-		// 新增字段
 		RBACDetails:              policy.RBACDetails,
 		NetworkPolicyDetails:     policy.NetworkPolicyDetails,
 		PodSecurityDetails:       policy.PodSecurityDetails,
 		AuditLoggingDetails:      policy.AuditLoggingDetails,
 		CNIPlugin:                policy.CNIPlugin,
-		PodSecurityAdmissionMode:  policy.PodSecurityAdmissionMode,
+		PodSecurityAdmissionMode: policy.PodSecurityAdmissionMode,
 	}
 
 	utils.Success(c, http.StatusOK, response)

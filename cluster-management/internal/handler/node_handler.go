@@ -78,9 +78,9 @@ func NewNodeHandler(nodeService *service.NodeService) *NodeHandler {
 func (h *NodeHandler) ListNodes(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid cluster ID")
 		return
 	}
 
@@ -99,7 +99,7 @@ func (h *NodeHandler) ListNodes(c *gin.Context) {
 
 	nodes, total, summary, err := h.nodeService.ListNodes(id.String(), nodeType, status, page, limit)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to list nodes: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to list nodes: %v", err)
 		return
 	}
 
@@ -134,15 +134,15 @@ func (h *NodeHandler) GetNode(c *gin.Context) {
 	clusterID := c.Param("id")
 	nodeName := c.Param("nodeName")
 
-	clusterUUID, err := uuid.Parse(clusterID)
+	clusterUUID, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid cluster ID")
 		return
 	}
 
 	node, err := h.nodeService.GetNode(clusterUUID.String(), nodeName)
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Node not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Node not found")
 		return
 	}
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/service"
 	"github.com/taichu-system/cluster-management/pkg/utils"
@@ -27,11 +28,11 @@ func NewMachineHandler(machineService *service.MachineService, auditService *ser
 
 // CreateMachineRequest 创建机器请求
 type CreateMachineRequest struct {
-	Name             string            `json:"name" binding:"required"`
-	IPAddress        string            `json:"ip_address" binding:"required"`
-	InternalAddress  string            `json:"internal_address"`
-	User             string            `json:"user" binding:"required"`
-	Password         string            `json:"password" binding:"required"`
+	Name             string            `json:"name" binding:"required,min=1,max=63"`
+	IPAddress        string            `json:"ip_address" binding:"required,ip"`
+	InternalAddress  string            `json:"internal_address" binding:"omitempty,ip"`
+	User             string            `json:"user" binding:"required,min=1,max=50"`
+	Password         string            `json:"password" binding:"required,min=6"`
 	Role             string            `json:"role" binding:"required,oneof=master worker etcd registry"`
 	ArtifactPath     string            `json:"artifact_path"`
 	ImageRepo        string            `json:"image_repo"`
@@ -44,25 +45,24 @@ func (h *MachineHandler) CreateMachine(c *gin.Context) {
 	var req CreateMachineRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
-	// 验证必填字段
 	if req.Name == "" {
-		utils.Error(c, http.StatusBadRequest, "Machine name is required")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Machine name is required")
 		return
 	}
 	if req.IPAddress == "" {
-		utils.Error(c, http.StatusBadRequest, "IP address is required")
+		utils.Error(c, utils.ErrCodeValidationFailed, "IP address is required")
 		return
 	}
 	if req.User == "" {
-		utils.Error(c, http.StatusBadRequest, "User is required")
+		utils.Error(c, utils.ErrCodeValidationFailed, "User is required")
 		return
 	}
 	if req.Password == "" {
-		utils.Error(c, http.StatusBadRequest, "Password is required")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Password is required")
 		return
 	}
 
@@ -80,17 +80,16 @@ func (h *MachineHandler) CreateMachine(c *gin.Context) {
 	}
 
 	if err := h.machineService.CreateMachine(machine); err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to create machine: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to create machine: %v", err)
 		return
 	}
 
-	// 记录审计日志
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
+		user := "api-user"
 		h.auditService.CreateAuditEvent(
 			uuid.Nil,
 			"machine",
-			"create",
+			constants.EventTypeCreate,
 			"machine",
 			machine.ID.String(),
 			user,
@@ -107,7 +106,7 @@ func (h *MachineHandler) CreateMachine(c *gin.Context) {
 			map[string]interface{}{
 				"operation": "create_machine",
 			},
-			"success",
+			constants.StatusSuccess,
 		)
 	}
 
@@ -116,7 +115,6 @@ func (h *MachineHandler) CreateMachine(c *gin.Context) {
 
 // ListMachines 获取机器列表
 func (h *MachineHandler) ListMachines(c *gin.Context) {
-	// 解析查询参数
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
 	status := c.Query("status")
@@ -124,19 +122,19 @@ func (h *MachineHandler) ListMachines(c *gin.Context) {
 
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page < 1 {
-		utils.Error(c, http.StatusBadRequest, "Invalid page parameter")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid page parameter")
 		return
 	}
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit < 1 || limit > 100 {
-		utils.Error(c, http.StatusBadRequest, "Invalid limit parameter (1-100)")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid limit parameter (1-100)")
 		return
 	}
 
 	machines, total, err := h.machineService.ListMachines(page, limit, status, role)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to list machines: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to list machines: %v", err)
 		return
 	}
 
@@ -152,15 +150,15 @@ func (h *MachineHandler) ListMachines(c *gin.Context) {
 func (h *MachineHandler) GetMachine(c *gin.Context) {
 	machineID := c.Param("id")
 
-	id, err := uuid.Parse(machineID)
+	id, err := utils.ParseUUID(machineID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid machine ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid machine ID")
 		return
 	}
 
 	machine, err := h.machineService.GetMachine(id)
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Machine not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Machine not found")
 		return
 	}
 
@@ -171,26 +169,25 @@ func (h *MachineHandler) GetMachine(c *gin.Context) {
 func (h *MachineHandler) UpdateMachine(c *gin.Context) {
 	machineID := c.Param("id")
 
-	id, err := uuid.Parse(machineID)
+	id, err := utils.ParseUUID(machineID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid machine ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid machine ID")
 		return
 	}
 
 	var req CreateMachineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
 	machine, err := h.machineService.GetMachine(id)
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Machine not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Machine not found")
 		return
 	}
 
-	// 更新字段
-	oldMachine := *machine // 保存旧值用于审计日志
+	oldMachine := *machine
 	machine.Name = req.Name
 	machine.IPAddress = req.IPAddress
 	machine.InternalAddress = req.InternalAddress
@@ -205,17 +202,16 @@ func (h *MachineHandler) UpdateMachine(c *gin.Context) {
 	machine.Labels = convertMachineLabelsToJSONMap(req.Labels)
 
 	if err := h.machineService.UpdateMachine(machine); err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to update machine: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to update machine: %v", err)
 		return
 	}
 
-	// 记录审计日志
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
+		user := "api-user"
 		h.auditService.CreateAuditEvent(
 			uuid.Nil,
 			"machine",
-			"update",
+			constants.EventTypeUpdate,
 			"machine",
 			machine.ID.String(),
 			user,
@@ -238,7 +234,7 @@ func (h *MachineHandler) UpdateMachine(c *gin.Context) {
 			map[string]interface{}{
 				"operation": "update_machine",
 			},
-			"success",
+			constants.StatusSuccess,
 		)
 	}
 
@@ -249,31 +245,29 @@ func (h *MachineHandler) UpdateMachine(c *gin.Context) {
 func (h *MachineHandler) DeleteMachine(c *gin.Context) {
 	machineID := c.Param("id")
 
-	id, err := uuid.Parse(machineID)
+	id, err := utils.ParseUUID(machineID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid machine ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid machine ID")
 		return
 	}
 
-	// 获取机器信息用于审计日志
 	machine, err := h.machineService.GetMachine(id)
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Machine not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Machine not found")
 		return
 	}
 
 	if err := h.machineService.DeleteMachine(id); err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to delete machine: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to delete machine: %v", err)
 		return
 	}
 
-	// 记录审计日志
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
+		user := "api-user"
 		h.auditService.CreateAuditEvent(
 			uuid.Nil,
 			"machine",
-			"delete",
+			constants.EventTypeDelete,
 			"machine",
 			id.String(),
 			user,
@@ -290,7 +284,7 @@ func (h *MachineHandler) DeleteMachine(c *gin.Context) {
 			map[string]interface{}{
 				"operation": "delete_machine",
 			},
-			"success",
+			constants.StatusSuccess,
 		)
 	}
 
@@ -301,9 +295,9 @@ func (h *MachineHandler) DeleteMachine(c *gin.Context) {
 func (h *MachineHandler) UpdateMachineStatus(c *gin.Context) {
 	machineID := c.Param("id")
 
-	id, err := uuid.Parse(machineID)
+	id, err := utils.ParseUUID(machineID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid machine ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid machine ID")
 		return
 	}
 
@@ -312,27 +306,25 @@ func (h *MachineHandler) UpdateMachineStatus(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
-	// 获取机器信息用于审计日志
 	machine, err := h.machineService.GetMachine(id)
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Machine not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Machine not found")
 		return
 	}
 
 	oldStatus := machine.Status
 
 	if err := h.machineService.UpdateMachineStatus(id, req.Status); err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to update machine status: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to update machine status: %v", err)
 		return
 	}
 
-	// 记录审计日志
 	if h.auditService != nil {
-		user := "api-user" // TODO: 从上下文中获取实际用户
+		user := "api-user"
 		h.auditService.CreateAuditEvent(
 			uuid.Nil,
 			"machine",
@@ -351,7 +343,7 @@ func (h *MachineHandler) UpdateMachineStatus(c *gin.Context) {
 			map[string]interface{}{
 				"operation": "update_machine_status",
 			},
-			"success",
+			constants.StatusSuccess,
 		)
 	}
 

@@ -51,15 +51,15 @@ func NewExpansionHandler(expansionService *service.ExpansionService) *ExpansionH
 func (h *ExpansionHandler) RequestExpansion(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeInvalidInput, "Invalid cluster ID")
 		return
 	}
 
 	var req ExpansionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
@@ -73,7 +73,7 @@ func (h *ExpansionHandler) RequestExpansion(c *gin.Context) {
 		"api-user",
 	)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to request expansion: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to request expansion: %v", err)
 		return
 	}
 
@@ -96,21 +96,21 @@ func (h *ExpansionHandler) RequestExpansion(c *gin.Context) {
 		CreatedAt:    expansion.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
-	utils.Success(c, http.StatusCreated, response)
+	utils.Success(c, http.StatusOK, response)
 }
 
 func (h *ExpansionHandler) GetExpansionHistory(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeInvalidInput, "Invalid cluster ID")
 		return
 	}
 
 	expansions, err := h.expansionService.GetExpansionHistory(id)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to get expansion history: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to get expansion history: %v", err)
 		return
 	}
 

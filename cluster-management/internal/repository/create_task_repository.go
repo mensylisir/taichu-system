@@ -2,6 +2,7 @@ package repository
 
 import (
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"gorm.io/gorm"
 )
@@ -89,5 +90,5 @@ func (r *CreateTaskRepository) GetByStatus(status string) ([]*model.CreateTask, 
 
 // GetRunningTasks 获取运行中的任务
 func (r *CreateTaskRepository) GetRunningTasks() ([]*model.CreateTask, error) {
-	return r.GetByStatus("running")
+	return r.GetByStatus(constants.StatusRunning)
 }

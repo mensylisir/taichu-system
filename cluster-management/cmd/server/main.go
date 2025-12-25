@@ -63,17 +63,35 @@ func main() {
 	autoscalingPolicyRepo := repository.NewAutoscalingPolicyRepository(db)
 	backupRepo := repository.NewBackupRepository(db)
 	backupScheduleRepo := repository.NewBackupScheduleRepository(db)
-	environmentRepo := repository.NewClusterEnvironmentRepository(db)
+	clusterEnvironmentRepo := repository.NewClusterEnvironmentRepository(db)
 	importRepo := repository.NewImportRecordRepository(db)
 	machineRepo := repository.NewMachineRepository(db)
 	createTaskRepo := repository.NewCreateTaskRepository(db)
 	clusterResourceRepo := repository.NewClusterResourceRepository(db)
+
+	tenantRepo := repository.NewTenantRepository(db)
+	environmentRepo := repository.NewEnvironmentRepository(db)
+	applicationRepo := repository.NewApplicationRepository(db)
+	quotaRepo := repository.NewQuotaRepository(db)
+	classificationRepo := repository.NewResourceClassificationRepository(db)
+	alertRepo := repository.NewAlertRepository(db)
 
 	healthCheckWorker := worker.NewHealthCheckWorker(
 		clusterRepo,
 		stateRepo,
 		clusterManager,
 		encryptionService,
+	)
+
+	resourceClassificationWorker := worker.NewResourceClassificationWorker(
+		clusterRepo,
+		encryptionService,
+		clusterManager,
+		tenantRepo,
+		environmentRepo,
+		applicationRepo,
+		quotaRepo,
+		classificationRepo,
 	)
 
 	resourceSyncWorker := worker.NewResourceSyncWorker(
@@ -86,6 +104,7 @@ func main() {
 		securityPolicyRepo,
 		clusterManager,
 		encryptionService,
+		resourceClassificationWorker,
 	)
 
 	log.Printf("Worker.Enabled: %v", cfg.Worker.Enabled)
@@ -115,9 +134,17 @@ func main() {
 			resourceSyncWorker.Start()
 			defer resourceSyncWorker.Stop()
 		}
+
+		log.Println("Starting resource classification worker...")
+		resourceClassificationWorker.Start()
+		defer resourceClassificationWorker.Stop()
 	} else {
 		log.Println("Worker is disabled in configuration")
 	}
+
+	auditRepo := repository.NewAuditRepository(db)
+	auditService := service.NewAuditService(auditRepo)
+	alertService := service.NewAlertService(alertRepo)
 
 	clusterService := service.NewClusterService(
 		clusterRepo,
@@ -125,6 +152,7 @@ func main() {
 		clusterResourceRepo,
 		encryptionService,
 		clusterManager,
+		auditService,
 	)
 
 	nodeService := service.NewNodeService(
@@ -165,6 +193,7 @@ func main() {
 		clusterRepo,
 		encryptionService,
 		clusterManager,
+		alertService,
 	)
 
 	restoreService := service.NewRestoreService(
@@ -178,7 +207,7 @@ func main() {
 	topologyService := service.NewTopologyService(
 		clusterRepo,
 		stateRepo,
-		environmentRepo,
+		clusterEnvironmentRepo,
 	)
 
 	importService := service.NewImportService(
@@ -187,10 +216,11 @@ func main() {
 		encryptionService,
 		clusterManager,
 		clusterService,
+		tenantRepo,
+		environmentRepo,
+		applicationRepo,
+		quotaRepo,
 	)
-
-	auditRepo := repository.NewAuditRepository(db)
-	auditService := service.NewAuditService(auditRepo)
 
 	expansionRepo := repository.NewExpansionRepository(db)
 	expansionService := service.NewExpansionService(
@@ -214,6 +244,16 @@ func main() {
 	authService := service.NewAuthService(userRepo, "your-secret-key", 24*time.Hour)
 	authHandler := handler.NewAuthHandler(authService, auditService)
 
+	// 三级分类模型相关服务
+	tenantService := service.NewTenantService(tenantRepo, quotaRepo, environmentRepo, auditService)
+	environmentService := service.NewEnvironmentService(environmentRepo, quotaRepo, auditService)
+	applicationService := service.NewApplicationService(applicationRepo, quotaRepo, auditService)
+	kubeClient, _ := kubernetesService.GetClientset("")
+	quotaService := service.NewQuotaService(kubeClient, quotaRepo, environmentRepo, tenantRepo)
+	constraintValidator := service.NewConstraintValidator(tenantRepo, environmentRepo, applicationRepo, quotaRepo)
+	constraintMonitor := service.NewConstraintMonitor(tenantRepo, environmentRepo, applicationRepo, quotaRepo, db)
+	quotaInheritance := service.NewQuotaInheritance(tenantRepo, environmentRepo, quotaRepo)
+
 	clusterHandler := handler.NewClusterHandler(
 		clusterService,
 		encryptionService,
@@ -234,7 +274,23 @@ func main() {
 	expansionHandler := handler.NewExpansionHandler(expansionService)
 	machineHandler := handler.NewMachineHandler(machineService, auditService)
 
-	r := setupRoutes(clusterHandler, nodeHandler, eventHandler, securityPolicyHandler, autoscalingPolicyHandler, backupHandler, topologyHandler, importHandler, auditHandler, expansionHandler, machineHandler, authHandler)
+	// 三级分类模型相关Handler
+	tenantHandler := handler.NewTenantHandler(tenantService, constraintValidator)
+	environmentHandler := handler.NewEnvironmentHandler(environmentService, constraintValidator, quotaInheritance)
+	applicationHandler := handler.NewApplicationHandler(applicationService, constraintValidator)
+	constraintHandler := handler.NewConstraintHandler(constraintValidator, constraintMonitor, nil)
+	resourceClassificationHandler := handler.NewResourceClassificationHandler(
+		clusterRepo,
+		tenantRepo,
+		environmentRepo,
+		applicationRepo,
+		quotaRepo,
+		resourceClassificationWorker,
+		quotaService,
+		nil,
+	)
+
+	r := setupRoutes(clusterHandler, nodeHandler, eventHandler, securityPolicyHandler, autoscalingPolicyHandler, backupHandler, topologyHandler, importHandler, auditHandler, expansionHandler, machineHandler, authHandler, tenantHandler, environmentHandler, applicationHandler, constraintHandler, resourceClassificationHandler)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Server.Port,
@@ -402,6 +458,12 @@ func setupRoutes(
 	expansionHandler *handler.ExpansionHandler,
 	machineHandler *handler.MachineHandler,
 	authHandler *handler.AuthHandler,
+	// 新增：三级分类模型Handler
+	tenantHandler *handler.TenantHandler,
+	environmentHandler *handler.EnvironmentHandler,
+	applicationHandler *handler.ApplicationHandler,
+	constraintHandler *handler.ConstraintHandler,
+	resourceClassificationHandler *handler.ResourceClassificationHandler,
 ) *gin.Engine {
 	r := gin.New()
 
@@ -539,6 +601,52 @@ func setupRoutes(
 		{
 			createTasks.GET("", clusterHandler.ListCreateTasks)
 			createTasks.GET(":taskId", clusterHandler.GetCreateTask)
+		}
+
+		// 三级分类模型接口
+		tenants := v1.Group("/tenants")
+		{
+			tenants.POST("", tenantHandler.CreateTenant)
+			tenants.GET("", tenantHandler.ListTenants)
+			tenants.GET(":id", tenantHandler.GetTenant)
+			tenants.PUT(":id", tenantHandler.UpdateTenant)
+			tenants.DELETE(":id", tenantHandler.DeleteTenant)
+			tenants.GET(":id/quota", tenantHandler.GetTenantQuota)
+			tenants.PUT(":id/quota", tenantHandler.UpdateTenantQuota)
+			tenants.GET(":id/environments", tenantHandler.GetTenantEnvironments)
+			tenants.GET("/predefined", tenantHandler.PredefinedTenants)
+			tenants.POST("/predefined/initialize", tenantHandler.InitializePredefinedTenants)
+		}
+
+		environments := v1.Group("/environments")
+		{
+			environments.POST("", environmentHandler.CreateEnvironment)
+			environments.GET("", environmentHandler.ListEnvironments)
+			environments.GET(":id", environmentHandler.GetEnvironment)
+			environments.PUT(":id", environmentHandler.UpdateEnvironment)
+			environments.DELETE(":id", environmentHandler.DeleteEnvironment)
+			environments.GET(":id/quota", environmentHandler.GetEnvironmentQuota)
+			environments.PUT(":id/quota", environmentHandler.UpdateEnvironmentQuota)
+			environments.POST(":id/quota/inherit", environmentHandler.InheritQuota)
+			environments.GET(":id/applications", environmentHandler.GetEnvironmentApplications)
+			environments.GET(":id/namespace-info", environmentHandler.GetNamespaceInfo)
+			environments.POST(":id/quota/sync", environmentHandler.SyncResourceQuota)
+		}
+
+		applications := v1.Group("/applications")
+		{
+			applications.POST("", applicationHandler.CreateApplication)
+			applications.GET("", applicationHandler.ListApplications)
+			applications.GET(":id", applicationHandler.GetApplication)
+			applications.PUT(":id", applicationHandler.UpdateApplication)
+			applications.DELETE(":id", applicationHandler.DeleteApplication)
+			applications.GET(":id/resource-spec", applicationHandler.GetApplicationResourceSpec)
+			applications.PUT(":id/resource-spec", applicationHandler.UpdateApplicationResourceSpec)
+			applications.POST(":id/scale", applicationHandler.ScaleApplication)
+			applications.POST("/discover", applicationHandler.DiscoverApplications)
+			applications.POST("/aggregate", applicationHandler.AggregateApplications)
+			applications.GET(":id/metrics", applicationHandler.GetApplicationMetrics)
+			applications.GET("/tenant/:tenantId", applicationHandler.GetApplicationsByTenant)
 		}
 	}
 

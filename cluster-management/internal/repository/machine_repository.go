@@ -16,6 +16,10 @@ func NewMachineRepository(db *gorm.DB) *MachineRepository {
 	return &MachineRepository{db: db}
 }
 
+func (r *MachineRepository) GetDB() *gorm.DB {
+	return r.db
+}
+
 // Create 创建机器
 func (r *MachineRepository) Create(machine *model.Machine) error {
 	return r.db.Create(machine).Error

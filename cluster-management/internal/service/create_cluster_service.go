@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 )
@@ -133,7 +134,7 @@ func (s *CreateClusterService) executeCreateTask(taskID uuid.UUID) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		s.taskRepo.UpdateStatus(taskID, "failed")
+		s.taskRepo.UpdateStatus(taskID, constants.StatusFailed)
 		s.taskRepo.UpdateProgress(taskID, 0, fmt.Sprintf("Failed to create stdout pipe: %v", err))
 		return
 	}
@@ -176,10 +177,10 @@ func (s *CreateClusterService) executeCreateTask(taskID uuid.UUID) {
 	task.CompletedAt = &completedAt
 
 	if err != nil {
-		s.taskRepo.UpdateStatus(taskID, "failed")
+		s.taskRepo.UpdateStatus(taskID, constants.StatusFailed)
 		s.taskRepo.UpdateProgress(taskID, task.Progress, fmt.Sprintf("Cluster creation failed: %v", err))
 	} else {
-		s.taskRepo.UpdateStatus(taskID, "success")
+		s.taskRepo.UpdateStatus(taskID, constants.StatusSuccess)
 		s.taskRepo.UpdateProgress(taskID, 100, "Cluster creation completed successfully")
 	}
 

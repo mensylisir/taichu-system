@@ -26,6 +26,9 @@
 - [扩展接口](#扩展接口)
 - [机器管理接口](#机器管理接口)
 - [创建任务接口](#创建任务接口)
+- [租户管理接口](#租户管理接口)
+- [环境管理接口](#环境管理接口)
+- [应用管理接口](#应用管理接口)
 - [用户管理接口](#用户管理接口)
 - [错误码说明](#错误码说明)
 - [状态说明](#状态说明)
@@ -1440,6 +1443,1055 @@
     "logs": "Cluster created successfully",
     "created_at": "2025-01-01T00:00:00Z",
     "completed_at": "2025-01-01T01:00:00Z"
+  }
+}
+```
+
+---
+
+## 租户管理接口
+
+### 创建租户
+
+**接口地址**: `POST /api/v1/tenants`
+
+**认证**: 需要JWT令牌
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string",
+  "quota": {
+    "cpu_cores": 100,
+    "memory_bytes": 107374182400,
+    "storage_bytes": 1073741824000,
+    "pod_count": 1000
+  }
+}
+```
+
+**请求参数说明**:
+- `name`: 租户名称（必填）
+- `description`: 租户描述（可选）
+- `quota`: 配额限制（可选）
+  - `cpu_cores`: CPU核心数
+  - `memory_bytes`: 内存字节数
+  - `storage_bytes`: 存储字节数
+  - `pod_count`: Pod数量
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "tenant1",
+    "description": "测试租户",
+    "quota": {
+      "cpu_cores": 100,
+      "memory_bytes": 107374182400,
+      "storage_bytes": 1073741824000,
+      "pod_count": 1000
+    },
+    "created_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 获取租户列表
+
+**接口地址**: `GET /api/v1/tenants`
+
+**认证**: 需要JWT令牌
+
+**查询参数**:
+- `name`: 租户名称（可选）
+- `page`: 页码（可选）
+- `limit`: 每页数量（可选）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "tenants": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "tenant1",
+        "description": "测试租户",
+        "quota": {
+          "cpu_cores": 100,
+          "memory_bytes": 107374182400,
+          "storage_bytes": 1073741824000,
+          "pod_count": 1000
+        },
+        "environment_count": 3,
+        "created_at": "2025-01-01T00:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+---
+
+### 获取租户详情
+
+**接口地址**: `GET /api/v1/tenants/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 租户ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "tenant1",
+    "description": "测试租户",
+    "quota": {
+      "cpu_cores": 100,
+      "memory_bytes": 107374182400,
+      "storage_bytes": 1073741824000,
+      "pod_count": 1000
+    },
+    "environment_count": 3,
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 更新租户
+
+**接口地址**: `PUT /api/v1/tenants/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 租户ID
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string"
+}
+```
+
+---
+
+### 删除租户
+
+**接口地址**: `DELETE /api/v1/tenants/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 租户ID
+
+---
+
+### 获取租户配额
+
+**接口地址**: `GET /api/v1/tenants/{id}/quota`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 租户ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "cpu_cores": {
+      "limit": 100,
+      "used": 45,
+      "available": 55
+    },
+    "memory_bytes": {
+      "limit": 107374182400,
+      "used": 53687091200,
+      "available": 53687091200
+    },
+    "storage_bytes": {
+      "limit": 1073741824000,
+      "used": 536870912000,
+      "available": 536870912000
+    },
+    "pod_count": {
+      "limit": 1000,
+      "used": 350,
+      "available": 650
+    }
+  }
+}
+```
+
+---
+
+### 更新租户配额
+
+**接口地址**: `PUT /api/v1/tenants/{id}/quota`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 租户ID
+
+**请求体**:
+```json
+{
+  "cpu_cores": 100,
+  "memory_bytes": 107374182400,
+  "storage_bytes": 1073741824000,
+  "pod_count": 1000
+}
+```
+
+---
+
+### 获取租户的环境列表
+
+**接口地址**: `GET /api/v1/tenants/{id}/environments`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 租户ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "environments": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "name": "dev",
+        "description": "开发环境",
+        "cluster_id": "550e8400-e29b-41d4-a716-446655440002",
+        "application_count": 5
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 获取预定义租户列表
+
+**接口地址**: `GET /api/v1/tenants/predefined`
+
+**认证**: 需要JWT令牌
+
+**描述**: 获取系统预定义的租户模板列表
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "tenants": [
+      {
+        "name": "default",
+        "description": "默认租户",
+        "quota": {
+          "cpu_cores": 100,
+          "memory_bytes": 107374182400,
+          "storage_bytes": 1073741824000,
+          "pod_count": 1000
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 初始化预定义租户
+
+**接口地址**: `POST /api/v1/tenants/predefined/initialize`
+
+**认证**: 需要JWT令牌
+
+**描述**: 初始化系统预定义的租户
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "initialized_count": 3,
+    "tenants": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "default"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 环境管理接口
+
+### 创建环境
+
+**接口地址**: `POST /api/v1/environments`
+
+**认证**: 需要JWT令牌
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string",
+  "tenant_id": "string",
+  "cluster_id": "string",
+  "quota": {
+    "cpu_cores": 50,
+    "memory_bytes": 53687091200,
+    "storage_bytes": 536870912000,
+    "pod_count": 500
+  }
+}
+```
+
+**请求参数说明**:
+- `name`: 环境名称（必填）
+- `description`: 环境描述（可选）
+- `tenant_id`: 所属租户ID（必填）
+- `cluster_id`: 关联集群ID（必填）
+- `quota`: 配额限制（可选）
+  - `cpu_cores`: CPU核心数
+  - `memory_bytes`: 内存字节数
+  - `storage_bytes`: 存储字节数
+  - `pod_count`: Pod数量
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "dev",
+    "description": "开发环境",
+    "tenant_id": "550e8400-e29b-41d4-a716-446655440000",
+    "cluster_id": "550e8400-e29b-41d4-a716-446655440002",
+    "quota": {
+      "cpu_cores": 50,
+      "memory_bytes": 53687091200,
+      "storage_bytes": 536870912000,
+      "pod_count": 500
+    },
+    "created_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 获取环境列表
+
+**接口地址**: `GET /api/v1/environments`
+
+**认证**: 需要JWT令牌
+
+**查询参数**:
+- `tenant_id`: 租户ID（可选）
+- `cluster_id`: 集群ID（可选）
+- `name`: 环境名称（可选）
+- `page`: 页码（可选）
+- `limit`: 每页数量（可选）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "environments": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "name": "dev",
+        "description": "开发环境",
+        "tenant_id": "550e8400-e29b-41d4-a716-446655440000",
+        "tenant_name": "tenant1",
+        "cluster_id": "550e8400-e29b-41d4-a716-446655440002",
+        "cluster_name": "cluster1",
+        "application_count": 5,
+        "created_at": "2025-01-01T00:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+---
+
+### 获取环境详情
+
+**接口地址**: `GET /api/v1/environments/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "dev",
+    "description": "开发环境",
+    "tenant_id": "550e8400-e29b-41d4-a716-446655440000",
+    "tenant_name": "tenant1",
+    "cluster_id": "550e8400-e29b-41d4-a716-446655440002",
+    "cluster_name": "cluster1",
+    "quota": {
+      "cpu_cores": 50,
+      "memory_bytes": 53687091200,
+      "storage_bytes": 536870912000,
+      "pod_count": 500
+    },
+    "application_count": 5,
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 更新环境
+
+**接口地址**: `PUT /api/v1/environments/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string"
+}
+```
+
+---
+
+### 删除环境
+
+**接口地址**: `DELETE /api/v1/environments/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+---
+
+### 获取环境配额
+
+**接口地址**: `GET /api/v1/environments/{id}/quota`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "cpu_cores": {
+      "limit": 50,
+      "used": 25,
+      "available": 25
+    },
+    "memory_bytes": {
+      "limit": 53687091200,
+      "used": 26843545600,
+      "available": 26843545600
+    },
+    "storage_bytes": {
+      "limit": 536870912000,
+      "used": 268435456000,
+      "available": 268435456000
+    },
+    "pod_count": {
+      "limit": 500,
+      "used": 180,
+      "available": 320
+    }
+  }
+}
+```
+
+---
+
+### 更新环境配额
+
+**接口地址**: `PUT /api/v1/environments/{id}/quota`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**请求体**:
+```json
+{
+  "cpu_cores": 50,
+  "memory_bytes": 53687091200,
+  "storage_bytes": 536870912000,
+  "pod_count": 500
+}
+```
+
+---
+
+### 继承配额
+
+**接口地址**: `POST /api/v1/environments/{id}/quota/inherit`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**描述**: 从所属租户继承配额设置
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "quota": {
+      "cpu_cores": 50,
+      "memory_bytes": 53687091200,
+      "storage_bytes": 536870912000,
+      "pod_count": 500
+    }
+  }
+}
+```
+
+---
+
+### 获取环境的应用列表
+
+**接口地址**: `GET /api/v1/environments/{id}/applications`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "applications": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440003",
+        "name": "nginx",
+        "namespace": "default",
+        "replicas": 3,
+        "status": "running"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 获取环境命名空间信息
+
+**接口地址**: `GET /api/v1/environments/{id}/namespace-info`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**描述**: 获取环境关联的Kubernetes命名空间信息
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "namespace": "tenant1-dev",
+    "labels": {
+      "tenant": "tenant1",
+      "environment": "dev"
+    },
+    "resource_quota": {
+      "cpu": "50",
+      "memory": "50Gi",
+      "pods": "500"
+    }
+  }
+}
+```
+
+---
+
+### 同步资源配额
+
+**接口地址**: `POST /api/v1/environments/{id}/quota/sync`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 环境ID
+
+**描述**: 同步环境的资源配额到Kubernetes ResourceQuota对象
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "synced": true,
+    "resource_quota_name": "tenant1-dev-quota"
+  }
+}
+```
+
+---
+
+## 应用管理接口
+
+### 创建应用
+
+**接口地址**: `POST /api/v1/applications`
+
+**认证**: 需要JWT令牌
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string",
+  "environment_id": "string",
+  "namespace": "string",
+  "quota": {
+    "cpu_cores": 10,
+    "memory_bytes": 10737418240,
+    "storage_bytes": 107374182400,
+    "pod_count": 50
+  }
+}
+```
+
+**请求参数说明**:
+- `name`: 应用名称（必填）
+- `description`: 应用描述（可选）
+- `environment_id`: 所属环境ID（必填）
+- `namespace`: Kubernetes命名空间（必填）
+- `quota`: 配额限制（可选）
+  - `cpu_cores`: CPU核心数
+  - `memory_bytes`: 内存字节数
+  - `storage_bytes`: 存储字节数
+  - `pod_count`: Pod数量
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440003",
+    "name": "nginx",
+    "description": "Nginx应用",
+    "environment_id": "550e8400-e29b-41d4-a716-446655440001",
+    "namespace": "default",
+    "quota": {
+      "cpu_cores": 10,
+      "memory_bytes": 10737418240,
+      "storage_bytes": 107374182400,
+      "pod_count": 50
+    },
+    "created_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 获取应用列表
+
+**接口地址**: `GET /api/v1/applications`
+
+**认证**: 需要JWT令牌
+
+**查询参数**:
+- `environment_id`: 环境ID（可选）
+- `namespace`: 命名空间（可选）
+- `name`: 应用名称（可选）
+- `page`: 页码（可选）
+- `limit`: 每页数量（可选）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "applications": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440003",
+        "name": "nginx",
+        "description": "Nginx应用",
+        "environment_id": "550e8400-e29b-41d4-a716-446655440001",
+        "environment_name": "dev",
+        "namespace": "default",
+        "replicas": 3,
+        "status": "running",
+        "created_at": "2025-01-01T00:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+---
+
+### 获取应用详情
+
+**接口地址**: `GET /api/v1/applications/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 应用ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440003",
+    "name": "nginx",
+    "description": "Nginx应用",
+    "environment_id": "550e8400-e29b-41d4-a716-446655440001",
+    "environment_name": "dev",
+    "namespace": "default",
+    "quota": {
+      "cpu_cores": 10,
+      "memory_bytes": 10737418240,
+      "storage_bytes": 107374182400,
+      "pod_count": 50
+    },
+    "replicas": 3,
+    "status": "running",
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+---
+
+### 更新应用
+
+**接口地址**: `PUT /api/v1/applications/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 应用ID
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "description": "string"
+}
+```
+
+---
+
+### 删除应用
+
+**接口地址**: `DELETE /api/v1/applications/{id}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 应用ID
+
+---
+
+### 获取应用资源规格
+
+**接口地址**: `GET /api/v1/applications/{id}/resource-spec`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 应用ID
+
+**描述**: 获取应用的资源规格信息（CPU、内存、存储等）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "cpu": {
+      "request": "1",
+      "limit": "2"
+    },
+    "memory": {
+      "request": "1Gi",
+      "limit": "2Gi"
+    },
+    "storage": {
+      "request": "10Gi",
+      "limit": "20Gi"
+    },
+    "replicas": 3
+  }
+}
+```
+
+---
+
+### 更新应用资源规格
+
+**接口地址**: `PUT /api/v1/applications/{id}/resource-spec`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 应用ID
+
+**请求体**:
+```json
+{
+  "cpu": {
+    "request": "1",
+    "limit": "2"
+  },
+  "memory": {
+    "request": "1Gi",
+    "limit": "2Gi"
+  },
+  "storage": {
+    "request": "10Gi",
+    "limit": "20Gi"
+  }
+}
+```
+
+---
+
+### 扩缩容应用
+
+**接口地址**: `POST /api/v1/applications/{id}/scale`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 应用ID
+
+**请求体**:
+```json
+{
+  "replicas": 5
+}
+```
+
+**请求参数说明**:
+- `replicas`: 目标副本数（必填）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440003",
+    "name": "nginx",
+    "replicas": 5,
+    "status": "scaling"
+  }
+}
+```
+
+---
+
+### 发现应用
+
+**接口地址**: `POST /api/v1/applications/discover`
+
+**认证**: 需要JWT令牌
+
+**请求体**:
+```json
+{
+  "cluster_id": "string",
+  "namespace": "string"
+}
+```
+
+**描述**: 从Kubernetes集群中发现并注册应用
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "discovered_count": 5,
+    "applications": [
+      {
+        "name": "nginx",
+        "namespace": "default",
+        "kind": "Deployment",
+        "replicas": 3
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 聚合应用
+
+**接口地址**: `POST /api/v1/applications/aggregate`
+
+**认证**: 需要JWT令牌
+
+**请求体**:
+```json
+{
+  "application_ids": ["id1", "id2", "id3"]
+}
+```
+
+**描述**: 将多个应用聚合为一个应用组
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "group_id": "550e8400-e29b-41d4-a716-446655440010",
+    "application_count": 3,
+    "applications": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440003",
+        "name": "nginx"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 获取应用指标
+
+**接口地址**: `GET /api/v1/applications/{id}/metrics`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `id`: 应用ID
+
+**描述**: 获取应用的监控指标（CPU使用率、内存使用率等）
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "cpu_usage_percent": 45.5,
+    "memory_usage_percent": 60.2,
+    "pod_count": 3,
+    "ready_pod_count": 3,
+    "request_count": 1000,
+    "error_count": 5,
+    "latency_ms": 25.5
+  }
+}
+```
+
+---
+
+### 获取租户的应用列表
+
+**接口地址**: `GET /api/v1/applications/tenant/{tenantId}`
+
+**认证**: 需要JWT令牌
+
+**路径参数**:
+- `tenantId`: 租户ID
+
+**响应示例**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "applications": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440003",
+        "name": "nginx",
+        "environment_name": "dev",
+        "namespace": "default",
+        "status": "running"
+      }
+    ],
+    "total": 1
   }
 }
 ```

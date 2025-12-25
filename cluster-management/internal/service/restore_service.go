@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 	corev1 "k8s.io/api/core/v1"
@@ -170,7 +171,7 @@ func (s *RestoreService) RestoreBackup(clusterID, backupID, restoreName string) 
 		return nil, fmt.Errorf("failed to get backup: %w", err)
 	}
 
-	if backup.Status != "completed" {
+	if backup.Status != constants.StatusCompleted {
 		return nil, fmt.Errorf("backup is not completed, current status: %s", backup.Status)
 	}
 
@@ -184,7 +185,7 @@ func (s *RestoreService) RestoreBackup(clusterID, backupID, restoreName string) 
 	restoreID := uuid.New().String()
 	result := &RestoreResult{
 		RestoreID: restoreID,
-		Status:    "running",
+		Status:    constants.StatusRunning,
 		StartTime: time.Now(),
 	}
 
@@ -200,7 +201,7 @@ func (s *RestoreService) GetRestoreProgress(restoreID string) (*RestoreProgress,
 	// 为了简化，我们返回一个模拟的进度
 	return &RestoreProgress{
 		RestoreID:   restoreID,
-		Status:      "running",
+		Status:      constants.StatusRunning,
 		Progress:    50.0,
 		CurrentStep: "正在恢复资源",
 		StartTime:   time.Now().Add(-10 * time.Minute),

@@ -19,21 +19,23 @@ import (
 )
 
 type ResourceSyncWorker struct {
-	clusterRepo           *repository.ClusterRepository
-	nodeRepo              *repository.NodeRepository
-	eventRepo             *repository.EventRepository
-	clusterResourceRepo   *repository.ClusterResourceRepository
-	clusterStateRepo      *repository.ClusterStateRepository
-	autoscalingPolicyRepo *repository.AutoscalingPolicyRepository
-	securityPolicyRepo    *repository.SecurityPolicyRepository
-	clusterManager        *service.ClusterManager
-	encryptionSvc         *service.EncryptionService
-	wg                    sync.WaitGroup
-	ctx                   context.Context
-	cancel                context.CancelFunc
-	syncInterval          time.Duration
-	maxConcurrency        int
-	sem                   chan struct{}
+	clusterRepo                  *repository.ClusterRepository
+	nodeRepo                     *repository.NodeRepository
+	eventRepo                    *repository.EventRepository
+	clusterResourceRepo          *repository.ClusterResourceRepository
+	clusterStateRepo             *repository.ClusterStateRepository
+	autoscalingPolicyRepo        *repository.AutoscalingPolicyRepository
+	securityPolicyRepo           *repository.SecurityPolicyRepository
+	clusterManager               *service.ClusterManager
+	encryptionSvc                *service.EncryptionService
+	// 新增：存量资源分类工作器
+	resourceClassificationWorker *ResourceClassificationWorker
+	wg                           sync.WaitGroup
+	ctx                          context.Context
+	cancel                       context.CancelFunc
+	syncInterval                 time.Duration
+	maxConcurrency               int
+	sem                          chan struct{}
 }
 
 func NewResourceSyncWorker(
@@ -46,24 +48,32 @@ func NewResourceSyncWorker(
 	securityPolicyRepo *repository.SecurityPolicyRepository,
 	clusterManager *service.ClusterManager,
 	encryptionSvc *service.EncryptionService,
+	// 新增参数（可选）
+	resourceClassificationWorker ...*ResourceClassificationWorker,
 ) *ResourceSyncWorker {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var rcw *ResourceClassificationWorker
+	if len(resourceClassificationWorker) > 0 {
+		rcw = resourceClassificationWorker[0]
+	}
+
 	return &ResourceSyncWorker{
-		clusterRepo:           clusterRepo,
-		nodeRepo:              nodeRepo,
-		eventRepo:             eventRepo,
-		clusterResourceRepo:   clusterResourceRepo,
-		clusterStateRepo:      clusterStateRepo,
-		autoscalingPolicyRepo: autoscalingPolicyRepo,
-		securityPolicyRepo:    securityPolicyRepo,
-		clusterManager:        clusterManager,
-		encryptionSvc:         encryptionSvc,
-		ctx:                   ctx,
-		cancel:                cancel,
-		syncInterval:          5 * time.Minute,
-		maxConcurrency:        10,
-		sem:                   make(chan struct{}, 10),
+		clusterRepo:                  clusterRepo,
+		nodeRepo:                     nodeRepo,
+		eventRepo:                    eventRepo,
+		clusterResourceRepo:          clusterResourceRepo,
+		clusterStateRepo:             clusterStateRepo,
+		autoscalingPolicyRepo:        autoscalingPolicyRepo,
+		securityPolicyRepo:           securityPolicyRepo,
+		clusterManager:               clusterManager,
+		encryptionSvc:                encryptionSvc,
+		resourceClassificationWorker: rcw,
+		ctx:                          ctx,
+		cancel:                       cancel,
+		syncInterval:                 5 * time.Minute,
+		maxConcurrency:               10,
+		sem:                          make(chan struct{}, 10),
 	}
 }
 
@@ -153,6 +163,14 @@ func (w *ResourceSyncWorker) syncClusterData(cluster model.Cluster) {
 	// 同步安全策略
 	if err := w.syncSecurityPolicies(ctx, clientset, cluster.ID.String()); err != nil {
 		log.Printf("Failed to sync security policies: %v", err)
+	}
+
+	// 同步命名空间级资源（三级分类模型相关）
+	w.syncNamespaceResources(ctx, clientset, cluster.ID)
+
+	// 触发存量资源分类（仅对未分类的资源）
+	if w.resourceClassificationWorker != nil {
+		w.triggerResourceClassification(cluster.ID.String())
 	}
 
 	// 更新 cluster_state 中的 APIServerURL
@@ -654,3 +672,87 @@ func (w *ResourceSyncWorker) updateAPIServerURL(ctx context.Context, nodes []cor
 		log.Printf("Updated APIServerURL for cluster %s: %s", clusterID, apiServerURL)
 	}
 }
+
+// syncNamespaceResources 同步命名空间级资源（用于三级分类模型）
+func (w *ResourceSyncWorker) syncNamespaceResources(ctx context.Context, clientset *kubernetes.Clientset, clusterID uuid.UUID) {
+	log.Printf("Syncing namespace resources for cluster %s", clusterID)
+
+	// 获取所有命名空间
+	namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("Failed to list namespaces: %v", err)
+		return
+	}
+
+	for _, ns := range namespaces.Items {
+		// 统计命名空间内的资源
+		w.countNamespaceResources(ctx, clientset, clusterID, ns.Name)
+	}
+
+	log.Printf("Completed namespace resource sync for cluster %s", clusterID)
+}
+
+// countNamespaceResources 统计单个命名空间的资源
+func (w *ResourceSyncWorker) countNamespaceResources(ctx context.Context, clientset *kubernetes.Clientset, clusterID uuid.UUID, namespace string) {
+	// 统计Deployments
+	deployments, err := clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	deploymentCount := 0
+	if err == nil {
+		deploymentCount = len(deployments.Items)
+	}
+
+	// 统计StatefulSets
+	statefulSets, err := clientset.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
+	statefulSetCount := 0
+	if err == nil {
+		statefulSetCount = len(statefulSets.Items)
+	}
+
+	// 统计Services
+	services, err := clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	serviceCount := 0
+	if err == nil {
+		serviceCount = len(services.Items)
+	}
+
+	// 统计Pods
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	podCount := 0
+	if err == nil {
+		podCount = len(pods.Items)
+	}
+
+	// 统计ResourceQuota
+	quotas, err := clientset.CoreV1().ResourceQuotas(namespace).List(ctx, metav1.ListOptions{})
+	quotaCount := 0
+	if err == nil {
+		quotaCount = len(quotas.Items)
+	}
+
+	// 统计LimitRange
+	limitRanges, err := clientset.CoreV1().LimitRanges(namespace).List(ctx, metav1.ListOptions{})
+	limitRangeCount := 0
+	if err == nil {
+		limitRangeCount = len(limitRanges.Items)
+	}
+
+	log.Printf("Namespace %s: Deployments=%d, StatefulSets=%d, Services=%d, Pods=%d, Quotas=%d, LimitRanges=%d",
+		namespace, deploymentCount, statefulSetCount, serviceCount, podCount, quotaCount, limitRangeCount)
+}
+
+// triggerResourceClassification 触发存量资源分类
+func (w *ResourceSyncWorker) triggerResourceClassification(clusterID string) {
+	// 异步触发分类，避免阻塞主同步流程
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		log.Printf("Triggering resource classification for cluster: %s", clusterID)
+		if err := w.resourceClassificationWorker.TriggerClassification(clusterID); err != nil {
+			log.Printf("Failed to trigger resource classification for cluster %s: %v", clusterID, err)
+		} else {
+			log.Printf("Resource classification triggered successfully for cluster: %s", clusterID)
+		}
+	}()
+}
+
+

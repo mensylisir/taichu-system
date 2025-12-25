@@ -1,10 +1,9 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/middleware"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/service"
@@ -27,13 +26,12 @@ func NewAuthHandler(authService *service.AuthService, auditService *service.Audi
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
 	authResp, err := h.authService.Login(req.Username, req.Password)
 	if err != nil {
-		// 记录登录失败的审计日志
 		if h.auditService != nil {
 			h.auditService.CreateAuditEvent(
 				uuid.Nil,
@@ -49,14 +47,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 				map[string]interface{}{
 					"username": req.Username,
 				},
-				"failed",
+				constants.StatusFailed,
 			)
 		}
-		utils.Error(c, http.StatusUnauthorized, "Login failed: %v", err)
+		utils.Error(c, utils.ErrCodeUnauthorized, "Login failed: %v", err)
 		return
 	}
 
-	// 记录登录成功的审计日志
 	if h.auditService != nil {
 		h.auditService.CreateAuditEvent(
 			uuid.Nil,
@@ -72,80 +69,76 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			map[string]interface{}{
 				"username": req.Username,
 			},
-			"success",
+			constants.StatusSuccess,
 		)
 	}
 
-	utils.Success(c, http.StatusOK, authResp)
+	utils.Success(c, 200, authResp)
 }
 
 // Register 用户注册
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req model.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
-	// 设置默认角色
 	if req.Role == "" {
 		req.Role = "user"
 	}
 
 	user, err := h.authService.Register(req.Username, req.Email, req.Password, req.Role)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Registration failed: %v", err)
+		utils.Error(c, utils.ErrCodeAlreadyExists, "Registration failed: %v", err)
 		return
 	}
 
-	utils.Success(c, http.StatusCreated, user)
+	utils.Success(c, 200, user)
 }
 
 // RefreshToken 刷新令牌
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req model.RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
-	// 验证令牌并获取用户信息
 	user, err := h.authService.ValidateToken(req.Token)
 	if err != nil {
-		utils.Error(c, http.StatusUnauthorized, "Invalid token: %v", err)
+		utils.Error(c, utils.ErrCodeUnauthorized, "Invalid token: %v", err)
 		return
 	}
 
-	// 生成新令牌
 	authResp, err := h.authService.RefreshToken(user.ID.String())
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Token refresh failed: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Token refresh failed: %v", err)
 		return
 	}
 
-	utils.Success(c, http.StatusOK, authResp)
+	utils.Success(c, 200, authResp)
 }
 
 // Profile 获取当前用户信息
 func (h *AuthHandler) Profile(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
 	if len(authHeader) < 7 || authHeader[:7] != "Bearer " {
-		utils.Error(c, http.StatusBadRequest, "Invalid authorization header")
+		utils.Error(c, utils.ErrCodeBadRequest, "Invalid authorization header")
 		return
 	}
 
-	user, err := h.authService.ValidateToken(authHeader[7:]) // 去掉"Bearer "前缀
+	user, err := h.authService.ValidateToken(authHeader[7:])
 	if err != nil {
-		utils.Error(c, http.StatusUnauthorized, "Invalid token: %v", err)
+		utils.Error(c, utils.ErrCodeUnauthorized, "Invalid token: %v", err)
 		return
 	}
 
-	utils.Success(c, http.StatusOK, user)
+	utils.Success(c, 200, user)
 }
 
 // Logout 用户登出
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// 从 Authorization header 中获取用户信息
 	authHeader := c.GetHeader("Authorization")
 	var username string
 	if len(authHeader) >= 7 && authHeader[:7] == "Bearer " {
@@ -154,7 +147,6 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		}
 	}
 
-	// 记录审计日志
 	if h.auditService != nil {
 		h.auditService.CreateAuditEvent(
 			uuid.Nil,
@@ -170,27 +162,24 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 			map[string]interface{}{
 				"username": username,
 			},
-			"success",
+			constants.StatusSuccess,
 		)
 	}
 
-	// 在实际应用中，可以将令牌加入黑名单或使用Redis存储已登出的令牌
-	// 这里简化处理，只返回成功响应
-	utils.Success(c, http.StatusOK, gin.H{
+	utils.Success(c, 200, gin.H{
 		"message": "Successfully logged out",
 	})
 }
 
 // GenerateToken 生成令牌（用于测试）
 func (h *AuthHandler) GenerateToken(c *gin.Context) {
-	// Generate a test token for development
 	token, err := middleware.GenerateToken("test-id", "test-user", "admin", "your-secret-key")
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to generate token: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to generate token: %v", err)
 		return
 	}
 
-	utils.Success(c, http.StatusOK, gin.H{
+	utils.Success(c, 200, gin.H{
 		"token": token,
 	})
 }

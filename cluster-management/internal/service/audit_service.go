@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 )
@@ -18,14 +19,116 @@ func NewAuditService(auditRepo *repository.AuditRepository) *AuditService {
 	}
 }
 
-func (s *AuditService) CreateAuditEvent(clusterID uuid.UUID, eventType, action, resource, resourceID, user, ipAddress, userAgent string, oldValue, newValue map[string]interface{}, details map[string]interface{}, result string) error {
-	auditEvent := &model.AuditEvent{
-		ClusterID:  clusterID,
+func (s *AuditService) LogEvent(event *model.AuditEvent) error {
+	return s.auditRepo.Create(event)
+}
+
+func (s *AuditService) LogCreate(resource, resourceID, username, ipAddress, userAgent string, newValue interface{}) error {
+	var newJSON model.JSONMap
+	if newValue != nil {
+		if val, ok := newValue.(map[string]interface{}); ok {
+			newJSON = val
+		} else {
+			newJSON = make(model.JSONMap)
+		}
+	}
+
+	event := &model.AuditEvent{
+		EventType:  constants.EventTypeCreate,
+		Action:     constants.EventTypeCreate,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Username:   username,
+		IPAddress:  ipAddress,
+		UserAgent:  userAgent,
+		NewValue:   newJSON,
+		Result:     constants.StatusSuccess,
+	}
+	return s.auditRepo.Create(event)
+}
+
+func (s *AuditService) LogUpdate(resource, resourceID, username, ipAddress, userAgent string, oldValue, newValue interface{}) error {
+	var oldJSON, newJSON model.JSONMap
+	if oldValue != nil {
+		if val, ok := oldValue.(map[string]interface{}); ok {
+			oldJSON = val
+		} else {
+			oldJSON = make(model.JSONMap)
+		}
+	}
+	if newValue != nil {
+		if val, ok := newValue.(map[string]interface{}); ok {
+			newJSON = val
+		} else {
+			newJSON = make(model.JSONMap)
+		}
+	}
+
+	event := &model.AuditEvent{
+		EventType:  "update",
+		Action:     "update",
+		Resource:   resource,
+		ResourceID: resourceID,
+		Username:   username,
+		IPAddress:  ipAddress,
+		UserAgent:  userAgent,
+		OldValue:   oldJSON,
+		NewValue:   newJSON,
+		Result:     "success",
+	}
+	return s.auditRepo.Create(event)
+}
+
+func (s *AuditService) LogDelete(resource, resourceID, username, ipAddress, userAgent string, oldValue interface{}) error {
+	var oldJSON model.JSONMap
+	if oldValue != nil {
+		if val, ok := oldValue.(map[string]interface{}); ok {
+			oldJSON = val
+		} else {
+			oldJSON = make(model.JSONMap)
+		}
+	}
+
+	event := &model.AuditEvent{
+		EventType:  "delete",
+		Action:     "delete",
+		Resource:   resource,
+		ResourceID: resourceID,
+		Username:   username,
+		IPAddress:  ipAddress,
+		UserAgent:  userAgent,
+		OldValue:   oldJSON,
+		Result:     "success",
+	}
+	return s.auditRepo.Create(event)
+}
+
+func (s *AuditService) LogError(resource, resourceID, username, ipAddress, userAgent, action, errorMsg string) error {
+	event := &model.AuditEvent{
+		EventType:  constants.EventTypeError,
+		Action:     action,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Username:   username,
+		IPAddress:  ipAddress,
+		UserAgent:  userAgent,
+		Result:     constants.StatusFailed,
+		ErrorMsg:   errorMsg,
+	}
+	return s.auditRepo.Create(event)
+}
+
+func (s *AuditService) GetAuditLogs(clusterID uuid.UUID, params repository.AuditListParams) ([]*model.AuditEvent, int64, error) {
+	return s.auditRepo.GetAuditLogs(clusterID, params)
+}
+
+func (s *AuditService) CreateAuditEvent(clusterID uuid.UUID, eventType, action, resource, resourceID, username, ipAddress, userAgent string, oldValue, newValue, details map[string]interface{}, result string) error {
+	event := &model.AuditEvent{
 		EventType:  eventType,
 		Action:     action,
 		Resource:   resource,
 		ResourceID: resourceID,
-		Username:   user,
+		Username:   username,
 		IPAddress:  ipAddress,
 		UserAgent:  userAgent,
 		OldValue:   oldValue,
@@ -33,100 +136,16 @@ func (s *AuditService) CreateAuditEvent(clusterID uuid.UUID, eventType, action, 
 		Details:    details,
 		Result:     result,
 	}
-
-	if result == "failed" && details["error"] != nil {
-		auditEvent.ErrorMsg = details["error"].(string)
-	}
-
-	return s.auditRepo.Create(auditEvent)
+	return s.auditRepo.Create(event)
 }
 
-func (s *AuditService) LogClusterOperation(clusterID uuid.UUID, operation, resource string, user string, oldValue, newValue map[string]interface{}) error {
-	return s.CreateAuditEvent(
-		clusterID,
-		"cluster",
-		operation,
-		resource,
-		"",
-		user,
-		"",
-		"",
-		oldValue,
-		newValue,
-		map[string]interface{}{
-			"operation": operation,
-		},
-		"success",
-	)
-}
-
-func (s *AuditService) LogNodeOperation(clusterID uuid.UUID, operation, nodeName string, user string, oldValue, newValue map[string]interface{}) error {
-	return s.CreateAuditEvent(
-		clusterID,
-		"node",
-		operation,
-		"node",
-		nodeName,
-		user,
-		"",
-		"",
-		oldValue,
-		newValue,
-		map[string]interface{}{
-			"node_name": nodeName,
-		},
-		"success",
-	)
-}
-
-func (s *AuditService) LogSecurityPolicyOperation(clusterID uuid.UUID, operation string, user string, oldValue, newValue map[string]interface{}) error {
-	return s.CreateAuditEvent(
-		clusterID,
-		"security",
-		operation,
-		"security-policy",
-		"",
-		user,
-		"",
-		"",
-		oldValue,
-		newValue,
-		map[string]interface{}{
-			"operation": operation,
-		},
-		"success",
-	)
-}
-
-func (s *AuditService) LogBackupOperation(clusterID uuid.UUID, operation, backupID string, user string, details map[string]interface{}) error {
-	return s.CreateAuditEvent(
-		clusterID,
-		"backup",
-		operation,
-		"backup",
-		backupID,
-		user,
-		"",
-		"",
-		nil,
-		nil,
-		details,
-		"success",
-	)
-}
-
-func (s *AuditService) GetAuditLogs(clusterID uuid.UUID, params repository.AuditListParams) ([]*model.AuditEvent, int64, error) {
-	return s.auditRepo.ListByCluster(clusterID, params)
-}
-
-func (s *AuditService) CreateAuditEventWithTimestamp(clusterID uuid.UUID, eventType, action, resource, resourceID, user, ipAddress, userAgent string, oldValue, newValue map[string]interface{}, details map[string]interface{}, result string, timestamp time.Time) error {
-	auditEvent := &model.AuditEvent{
-		ClusterID:  clusterID,
+func (s *AuditService) CreateAuditEventWithTimestamp(clusterID uuid.UUID, eventType, action, resource, resourceID, username, ipAddress, userAgent string, oldValue, newValue, details map[string]interface{}, result string, timestamp time.Time) error {
+	event := &model.AuditEvent{
 		EventType:  eventType,
 		Action:     action,
 		Resource:   resource,
 		ResourceID: resourceID,
-		Username:   user,
+		Username:   username,
 		IPAddress:  ipAddress,
 		UserAgent:  userAgent,
 		OldValue:   oldValue,
@@ -134,12 +153,40 @@ func (s *AuditService) CreateAuditEventWithTimestamp(clusterID uuid.UUID, eventT
 		Details:    details,
 		Result:     result,
 		Timestamp:  timestamp,
-		CreatedAt:  timestamp,
 	}
+	return s.auditRepo.Create(event)
+}
 
-	if result == "failed" && details["error"] != nil {
-		auditEvent.ErrorMsg = details["error"].(string)
-	}
+func (s *AuditService) LogBackupOperation(clusterID uuid.UUID, eventType, backupID, username string, details map[string]interface{}) error {
+	return s.CreateAuditEvent(
+		clusterID,
+		eventType,
+		eventType,
+		"backup",
+		backupID,
+		username,
+		"",
+		"",
+		nil,
+		details,
+		nil,
+		constants.StatusSuccess,
+	)
+}
 
-	return s.auditRepo.Create(auditEvent)
+func (s *AuditService) LogClusterOperation(clusterID uuid.UUID, eventType, clusterIDStr, username string, details map[string]interface{}) error {
+	return s.CreateAuditEvent(
+		clusterID,
+		eventType,
+		eventType,
+		"cluster",
+		clusterIDStr,
+		username,
+		"",
+		"",
+		nil,
+		details,
+		nil,
+		constants.StatusSuccess,
+	)
 }

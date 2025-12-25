@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 	"k8s.io/client-go/kubernetes"
@@ -22,6 +23,7 @@ type BackupService struct {
 	encryptionSvc      *EncryptionService
 	clusterManager     *ClusterManager
 	sshService         *SSHService
+	alertService       *AlertService
 	mu                 sync.RWMutex
 }
 
@@ -39,6 +41,7 @@ func NewBackupService(
 	clusterRepo *repository.ClusterRepository,
 	encryptionSvc *EncryptionService,
 	clusterManager *ClusterManager,
+	alertService *AlertService,
 ) *BackupService {
 	return &BackupService{
 		backupRepo:         backupRepo,
@@ -47,6 +50,7 @@ func NewBackupService(
 		encryptionSvc:      encryptionSvc,
 		clusterManager:     clusterManager,
 		sshService:         NewSSHService(),
+		alertService:       alertService,
 	}
 }
 
@@ -62,7 +66,7 @@ func (s *BackupService) CreateBackup(clusterID, backupName, backupType string, r
 		ClusterID:         cluster.ID,
 		BackupName:        backupName,
 		BackupType:        backupType,
-		Status:            "pending",
+		Status:            constants.StatusPending,
 		StorageLocation:   storageLocation,
 		RetentionDays:     retentionDays,
 		SnapshotTimestamp: func() *time.Time { now := time.Now(); return &now }(),
@@ -86,8 +90,7 @@ func (s *BackupService) ExecuteBackup(backupID string) error {
 		return fmt.Errorf("failed to get cluster: %w", err)
 	}
 
-	// 更新状态为running
-	backup.Status = "running"
+	backup.Status = constants.StatusRunning
 	if err := s.backupRepo.Update(backup); err != nil {
 		return fmt.Errorf("failed to update backup status: %w", err)
 	}
@@ -161,7 +164,7 @@ func (s *BackupService) performFullBackup(backup *model.ClusterBackup, clientset
 	}
 
 	// 更新备份状态
-	backup.Status = "completed"
+	backup.Status = constants.StatusCompleted
 	backup.StorageSizeBytes = size
 	backup.CompletedAt = func() *time.Time { now := time.Now(); return &now }()
 
@@ -202,7 +205,7 @@ func (s *BackupService) performEtcdBackupStandalone(backup *model.ClusterBackup,
 		return s.handleBackupError(backup, fmt.Errorf("failed to calculate backup size: %w", err))
 	}
 
-	backup.Status = "completed"
+	backup.Status = constants.StatusCompleted
 	backup.StorageSizeBytes = size
 	backup.CompletedAt = func() *time.Time { now := time.Now(); return &now }()
 
@@ -228,7 +231,7 @@ func (s *BackupService) performResourcesBackup(backup *model.ClusterBackup, clie
 		return s.handleBackupError(backup, fmt.Errorf("failed to calculate backup size: %w", err))
 	}
 
-	backup.Status = "completed"
+	backup.Status = constants.StatusCompleted
 	backup.StorageSizeBytes = size
 	backup.CompletedAt = func() *time.Time { now := time.Now(); return &now }()
 
@@ -236,9 +239,18 @@ func (s *BackupService) performResourcesBackup(backup *model.ClusterBackup, clie
 }
 
 func (s *BackupService) handleBackupError(backup *model.ClusterBackup, err error) error {
-	backup.Status = "failed"
+	backup.Status = constants.StatusFailed
 	backup.ErrorMsg = err.Error()
-	return s.backupRepo.Update(backup)
+		
+	if err := s.backupRepo.Update(backup); err != nil {
+		return err
+	}
+
+	if s.alertService != nil {
+		s.alertService.AlertBackupFailed(backup.ID.String(), backup.ClusterID.String(), err.Error())
+	}
+
+	return nil
 }
 
 func (s *BackupService) ListBackups(clusterID, status string, page, limit int) ([]*model.ClusterBackup, int64, error) {
@@ -533,7 +545,7 @@ func (s *BackupService) ExecuteEtcdBackup(backupID string) error {
 	}
 
 	// 更新状态为running
-	backup.Status = "running"
+	backup.Status = constants.StatusRunning
 	backup.StartedAt = func() *time.Time { now := time.Now(); return &now }()
 	if err := s.backupRepo.Update(backup); err != nil {
 		return fmt.Errorf("failed to update backup status: %w", err)
@@ -584,7 +596,7 @@ func (s *BackupService) ExecuteEtcdBackup(backupID string) error {
 	}
 
 	// 更新备份成功状态
-	backup.Status = "completed"
+	backup.Status = constants.StatusCompleted
 	backup.SizeBytes = size
 	backup.StorageSizeBytes = size
 	backup.Location = backupPath
@@ -633,7 +645,7 @@ func (s *BackupService) ExecuteResourceBackup(backupID string) error {
 	}
 
 	// 更新状态为running
-	backup.Status = "running"
+	backup.Status = constants.StatusRunning
 	backup.StartedAt = func() *time.Time { now := time.Now(); return &now }()
 	if err := s.backupRepo.Update(backup); err != nil {
 		return fmt.Errorf("failed to update backup status: %w", err)
@@ -677,7 +689,7 @@ func (s *BackupService) ExecuteResourceBackup(backupID string) error {
 	}
 
 	// 更新备份成功状态
-	backup.Status = "completed"
+	backup.Status = constants.StatusCompleted
 	backup.SizeBytes = size
 	backup.StorageSizeBytes = size
 	backup.Location = backupPath

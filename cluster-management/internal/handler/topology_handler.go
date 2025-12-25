@@ -13,20 +13,20 @@ type TopologyHandler struct {
 }
 
 type ClusterNode struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Status      string `json:"status"`
-	NodeCount   int    `json:"node_count"`
-	Version     string `json:"version"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	NodeCount int    `json:"node_count"`
+	Version   string `json:"version"`
 }
 
 type EnvironmentTopology struct {
-	Type             string        `json:"type"`
-	Count            int           `json:"count"`
-	Clusters         []ClusterNode `json:"clusters"`
-	TotalNodeCount   int           `json:"total_node_count"`
-	HealthyClusters  int           `json:"healthy_clusters"`
-	UnhealthyClusters int          `json:"unhealthy_clusters"`
+	Type              string        `json:"type"`
+	Count             int           `json:"count"`
+	Clusters          []ClusterNode `json:"clusters"`
+	TotalNodeCount    int           `json:"total_node_count"`
+	HealthyClusters   int           `json:"healthy_clusters"`
+	UnhealthyClusters int           `json:"unhealthy_clusters"`
 }
 
 type TopologyResponse struct {
@@ -50,7 +50,7 @@ func NewTopologyHandler(topologyService *service.TopologyService) *TopologyHandl
 func (h *TopologyHandler) GetTopology(c *gin.Context) {
 	topology, err := h.topologyService.GetClusterTopology()
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to get topology: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to get topology: %v", err)
 		return
 	}
 
@@ -68,20 +68,20 @@ func (h *TopologyHandler) GetTopology(c *gin.Context) {
 		clusters := make([]ClusterNode, 0, len(env.Clusters))
 		for _, cluster := range env.Clusters {
 			clusters = append(clusters, ClusterNode{
-				ID:          cluster.ID,
-				Name:        cluster.Name,
-				Status:      cluster.Status,
-				NodeCount:   cluster.NodeCount,
-				Version:     cluster.Version,
+				ID:        cluster.ID,
+				Name:      cluster.Name,
+				Status:    cluster.Status,
+				NodeCount: cluster.NodeCount,
+				Version:   cluster.Version,
 			})
 		}
 
 		response.Environments = append(response.Environments, EnvironmentTopology{
-			Type:             env.Type,
-			Count:            env.Count,
-			Clusters:         clusters,
-			TotalNodeCount:   env.TotalNodeCount,
-			HealthyClusters:  env.HealthyClusters,
+			Type:              env.Type,
+			Count:             env.Count,
+			Clusters:          clusters,
+			TotalNodeCount:    env.TotalNodeCount,
+			HealthyClusters:   env.HealthyClusters,
 			UnhealthyClusters: env.UnhealthyClusters,
 		})
 	}

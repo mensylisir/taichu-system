@@ -18,11 +18,15 @@ type BackupScheduler struct {
 	backupScheduleRepo *repository.BackupScheduleRepository
 	clusterRepo        *repository.ClusterRepository
 	backupService      *service.BackupService
+	alertService       *service.AlertService
 	cron               *cron.Cron
 	wg                 sync.WaitGroup
 	ctx                context.Context
 	cancel             context.CancelFunc
 	runningBackups     sync.Map
+	runningSchedules   sync.Map
+	mu                 sync.Mutex
+	scheduleEntries    sync.Map
 }
 
 func NewBackupScheduler(
@@ -30,6 +34,7 @@ func NewBackupScheduler(
 	backupScheduleRepo *repository.BackupScheduleRepository,
 	clusterRepo *repository.ClusterRepository,
 	backupService *service.BackupService,
+	alertService *service.AlertService,
 ) *BackupScheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -38,6 +43,7 @@ func NewBackupScheduler(
 		backupScheduleRepo: backupScheduleRepo,
 		clusterRepo:        clusterRepo,
 		backupService:      backupService,
+		alertService:       alertService,
 		cron:               cron.New(cron.WithSeconds()),
 		ctx:                ctx,
 		cancel:             cancel,
@@ -76,22 +82,44 @@ func (s *BackupScheduler) Stop() {
 }
 
 func (s *BackupScheduler) loadSchedules() {
-	// 获取所有启用的定时任务
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	schedules, err := s.backupScheduleRepo.ListEnabled()
 	if err != nil {
 		log.Printf("Failed to load backup schedules: %v", err)
 		return
 	}
 
+	loadedScheduleIDs := make(map[string]bool)
 	for _, schedule := range schedules {
+		loadedScheduleIDs[schedule.ID.String()] = true
 		s.addSchedule(schedule)
 	}
+
+	s.scheduleEntries.Range(func(key, value interface{}) bool {
+		scheduleID := key.(string)
+		if !loadedScheduleIDs[scheduleID] {
+			if entryID, ok := value.(cron.EntryID); ok {
+				s.cron.Remove(entryID)
+				s.scheduleEntries.Delete(scheduleID)
+				log.Printf("Removed disabled backup schedule %s", scheduleID)
+			}
+		}
+		return true
+	})
 
 	log.Printf("Loaded %d backup schedules", len(schedules))
 }
 
 func (s *BackupScheduler) addSchedule(schedule *model.BackupSchedule) {
-	// 添加cron任务
+	scheduleID := schedule.ID.String()
+
+	if _, exists := s.scheduleEntries.Load(scheduleID); exists {
+		log.Printf("Backup schedule %s already exists, skipping", schedule.Name)
+		return
+	}
+
 	entryID, err := s.cron.AddFunc(schedule.CronExpr, func() {
 		s.executeBackupSchedule(schedule)
 	})
@@ -100,16 +128,28 @@ func (s *BackupScheduler) addSchedule(schedule *model.BackupSchedule) {
 		return
 	}
 
+	s.scheduleEntries.Store(scheduleID, entryID)
 	log.Printf("Added backup schedule %s with cron %s (entry ID: %v)", schedule.Name, schedule.CronExpr, entryID)
 }
 
 func (s *BackupScheduler) executeBackupSchedule(schedule *model.BackupSchedule) {
 	log.Printf("Executing backup schedule: %s", schedule.Name)
 
+	scheduleID := schedule.ID.String()
+
+	if _, running := s.runningSchedules.LoadOrStore(scheduleID, struct{}{}); running {
+		log.Printf("Backup schedule %s is already running, skipping execution", schedule.Name)
+		return
+	}
+	defer s.runningSchedules.Delete(scheduleID)
+
 	now := time.Now()
 	schedule.LastRunAt = &now
 	if err := s.backupScheduleRepo.Update(schedule); err != nil {
 		log.Printf("Failed to update last run time: %v", err)
+		if s.alertService != nil {
+			s.alertService.AlertScheduleFailed(scheduleID, schedule.ClusterID.String(), err.Error())
+		}
 	}
 
 	backupName := fmt.Sprintf("%s-%s", schedule.Name, now.Format("20060102-150405"))
@@ -121,6 +161,9 @@ func (s *BackupScheduler) executeBackupSchedule(schedule *model.BackupSchedule) 
 	)
 	if err != nil {
 		log.Printf("Failed to create backup for schedule %s: %v", schedule.Name, err)
+		if s.alertService != nil {
+			s.alertService.AlertScheduleFailed(scheduleID, schedule.ClusterID.String(), err.Error())
+		}
 		return
 	}
 
@@ -130,6 +173,9 @@ func (s *BackupScheduler) executeBackupSchedule(schedule *model.BackupSchedule) 
 
 		if err := s.backupService.ExecuteBackup(backup.ID.String()); err != nil {
 			log.Printf("Failed to execute backup %s for schedule %s: %v", backup.ID, schedule.Name, err)
+			if s.alertService != nil {
+				s.alertService.AlertScheduleFailed(scheduleID, schedule.ClusterID.String(), err.Error())
+			}
 		} else {
 			log.Printf("Backup %s for schedule %s completed successfully", backup.ID, schedule.Name)
 		}

@@ -5,14 +5,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 )
 
 type ExpansionService struct {
-	expansionRepo     *repository.ExpansionRepository
-	clusterRepo       *repository.ClusterRepository
-	stateRepo         *repository.ClusterStateRepository
+	expansionRepo       *repository.ExpansionRepository
+	clusterRepo         *repository.ClusterRepository
+	stateRepo           *repository.ClusterStateRepository
 	clusterResourceRepo *repository.ClusterResourceRepository
 }
 
@@ -57,7 +58,7 @@ func (s *ExpansionService) RequestExpansion(clusterID uuid.UUID, newNodeCount, n
 		NewMemoryGB:  newMemoryGB,
 		OldStorageGB: int(resource.TotalStorageBytes / 1024 / 1024 / 1024),
 		NewStorageGB: newStorageGB,
-		Status:       "pending",
+		Status:       constants.ExpansionStatusPending,
 		Reason:       reason,
 		Details: map[string]interface{}{
 			"cluster_name": cluster.Name,
@@ -78,7 +79,7 @@ func (s *ExpansionService) ExecuteExpansion(expansionID string) error {
 		return fmt.Errorf("failed to get expansion: %w", err)
 	}
 
-	expansion.Status = "in_progress"
+	expansion.Status = constants.ExpansionStatusInProgress
 	expansion.ExecutedBy = "system"
 	now := time.Now()
 	expansion.StartedAt = &now
@@ -118,14 +119,14 @@ func (s *ExpansionService) ExecuteExpansion(expansionID string) error {
 		return s.failExpansion(expansion, fmt.Errorf("failed to update cluster resource: %w", err))
 	}
 
-	expansion.Status = "completed"
+	expansion.Status = constants.ExpansionStatusSuccess
 	expansion.CompletedAt = &now
 
 	return s.expansionRepo.Update(expansion)
 }
 
 func (s *ExpansionService) failExpansion(expansion *model.ClusterExpansion, err error) error {
-	expansion.Status = "failed"
+	expansion.Status = constants.ExpansionStatusFailed
 	expansion.ErrorMsg = err.Error()
 	now := time.Now()
 	expansion.CompletedAt = &now

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/taichu-system/cluster-management/internal/constants"
 	"github.com/taichu-system/cluster-management/internal/service"
 	"github.com/taichu-system/cluster-management/pkg/utils"
 )
@@ -17,9 +18,9 @@ type BackupHandler struct {
 }
 
 type CreateBackupRequest struct {
-	BackupName    string `json:"backup_name" binding:"required"`
-	BackupType    string `json:"backup_type" binding:"required"`
-	RetentionDays int    `json:"retention_days"`
+	BackupName    string `json:"backup_name" binding:"required,min=1,max=100"`
+	BackupType    string `json:"backup_type" binding:"required,oneof=etcd resource"`
+	RetentionDays int    `json:"retention_days" binding:"omitempty,min=1,max=3650"`
 }
 
 type BackupSummary struct {
@@ -54,7 +55,7 @@ type BackupDetailResponse struct {
 }
 
 type RestoreBackupRequest struct {
-	RestoreName string `json:"restore_name"`
+	RestoreName string `json:"restore_name" binding:"required,min=1,max=100"`
 }
 
 type RestoreProgressResponse struct {
@@ -67,10 +68,10 @@ type RestoreProgressResponse struct {
 }
 
 type CreateBackupScheduleRequest struct {
-	Name          string `json:"name" binding:"required"`
-	CronExpr      string `json:"cron_expr" binding:"required"`
-	BackupType    string `json:"backup_type" binding:"required"`
-	RetentionDays int    `json:"retention_days"`
+	Name          string `json:"name" binding:"required,min=1,max=100"`
+	CronExpr      string `json:"cron_expr" binding:"required,cron"`
+	BackupType    string `json:"backup_type" binding:"required,oneof=etcd resource"`
+	RetentionDays int    `json:"retention_days" binding:"omitempty,min=1,max=3650"`
 	Enabled       bool   `json:"enabled"`
 	CreatedBy     string `json:"created_by" binding:"required"`
 
@@ -90,9 +91,9 @@ type CreateBackupScheduleRequest struct {
 }
 
 type UpdateBackupScheduleRequest struct {
-	CronExpr      string `json:"cron_expr"`
-	BackupType    string `json:"backup_type"`
-	RetentionDays int    `json:"retention_days"`
+	CronExpr      string `json:"cron_expr" binding:"omitempty,cron"`
+	BackupType    string `json:"backup_type" binding:"omitempty,oneof=etcd resource"`
+	RetentionDays int    `json:"retention_days" binding:"omitempty,min=1,max=3650"`
 	Enabled       bool   `json:"enabled"`
 
 	// etcd配置
@@ -112,16 +113,16 @@ type UpdateBackupScheduleRequest struct {
 
 // CreateEtcdBackupRequest etcd备份请求
 type CreateEtcdBackupRequest struct {
-	BackupName    string `json:"backup_name" binding:"required"`
-	BackupType    string `json:"backup_type" binding:"required"`
-	RetentionDays int    `json:"retention_days"`
+	BackupName    string `json:"backup_name" binding:"required,min=1,max=100"`
+	BackupType    string `json:"backup_type" binding:"required,oneof=etcd"`
+	RetentionDays int    `json:"retention_days" binding:"omitempty,min=1,max=3650"`
 }
 
 // CreateResourceBackupRequest 资源备份请求
 type CreateResourceBackupRequest struct {
-	BackupName    string `json:"backup_name" binding:"required"`
-	BackupType    string `json:"backup_type" binding:"required"`
-	RetentionDays int    `json:"retention_days"`
+	BackupName    string `json:"backup_name" binding:"required,min=1,max=100"`
+	BackupType    string `json:"backup_type" binding:"required,oneof=resource"`
+	RetentionDays int    `json:"retention_days" binding:"omitempty,min=1,max=3650"`
 }
 
 func NewBackupHandler(backupService *service.BackupService, restoreService *service.RestoreService, auditService *service.AuditService) *BackupHandler {
@@ -135,21 +136,21 @@ func NewBackupHandler(backupService *service.BackupService, restoreService *serv
 func (h *BackupHandler) CreateBackup(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid cluster ID")
 		return
 	}
 
 	var req CreateBackupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
 	backup, err := h.backupService.CreateBackup(id.String(), req.BackupName, req.BackupType, req.RetentionDays)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to create backup: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to create backup: %v", err)
 		return
 	}
 
@@ -163,7 +164,7 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 	if h.auditService != nil {
 		h.auditService.LogBackupOperation(
 			id,
-			"create",
+			constants.EventTypeCreate,
 			backup.ID.String(),
 			user,
 			map[string]interface{}{
@@ -180,21 +181,21 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 func (h *BackupHandler) CreateEtcdBackup(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid cluster ID")
 		return
 	}
 
 	var req CreateEtcdBackupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
 	backup, err := h.backupService.CreateEtcdBackup(id.String(), req.BackupName, req.BackupType, req.RetentionDays)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to create etcd backup: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to create etcd backup: %v", err)
 		return
 	}
 
@@ -225,7 +226,7 @@ func (h *BackupHandler) CreateEtcdBackup(c *gin.Context) {
 func (h *BackupHandler) CreateResourceBackup(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
 		return
@@ -270,7 +271,7 @@ func (h *BackupHandler) CreateResourceBackup(c *gin.Context) {
 func (h *BackupHandler) ListBackups(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
 		return
@@ -318,21 +319,21 @@ func (h *BackupHandler) GetBackup(c *gin.Context) {
 	clusterID := c.Param("id")
 	backupID := c.Param("backupId")
 
-	clusterUUID, err := uuid.Parse(clusterID)
+	clusterUUID, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid cluster ID")
 		return
 	}
 
-	backupUUID, err := uuid.Parse(backupID)
+	backupUUID, err := utils.ParseUUID(backupID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid backup ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid backup ID")
 		return
 	}
 
 	backup, err := h.backupService.GetBackup(clusterUUID.String(), backupUUID.String())
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Backup not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Backup not found")
 		return
 	}
 
@@ -362,13 +363,13 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 	clusterID := c.Param("id")
 	backupID := c.Param("backupId")
 
-	clusterUUID, err := uuid.Parse(clusterID)
+	clusterUUID, err := utils.ParseUUID(clusterID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
 		return
 	}
 
-	backupUUID, err := uuid.Parse(backupID)
+	backupUUID, err := utils.ParseUUID(backupID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid backup ID")
 		return
@@ -414,13 +415,13 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 	clusterID := c.Param("id")
 	backupID := c.Param("backupId")
 
-	clusterUUID, err := uuid.Parse(clusterID)
+	clusterUUID, err := utils.ParseUUID(clusterID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
 		return
 	}
 
-	backupUUID, err := uuid.Parse(backupID)
+	backupUUID, err := utils.ParseUUID(backupID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid backup ID")
 		return
@@ -440,7 +441,7 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 	if h.auditService != nil {
 		h.auditService.LogBackupOperation(
 			clusterUUID,
-			"delete",
+			constants.EventTypeDelete,
 			backupUUID.String(),
 			user,
 			map[string]interface{}{
@@ -457,15 +458,15 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 func (h *BackupHandler) ListBackupSchedules(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid cluster ID")
 		return
 	}
 
 	schedules, err := h.backupService.ListBackupSchedules(id.String())
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to list backup schedules: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to list backup schedules: %v", err)
 		return
 	}
 
@@ -475,7 +476,7 @@ func (h *BackupHandler) ListBackupSchedules(c *gin.Context) {
 func (h *BackupHandler) GetRestoreProgress(c *gin.Context) {
 	restoreID := c.Param("restoreId")
 
-	restoreUUID, err := uuid.Parse(restoreID)
+	restoreUUID, err := utils.ParseUUID(restoreID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid restore ID")
 		return
@@ -502,7 +503,7 @@ func (h *BackupHandler) GetRestoreProgress(c *gin.Context) {
 func (h *BackupHandler) CreateBackupSchedule(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
 		return
@@ -544,15 +545,15 @@ func (h *BackupHandler) CreateBackupSchedule(c *gin.Context) {
 func (h *BackupHandler) UpdateBackupSchedule(c *gin.Context) {
 	scheduleID := c.Param("scheduleId")
 
-	scheduleUUID, err := uuid.Parse(scheduleID)
+	scheduleUUID, err := utils.ParseUUID(scheduleID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid schedule ID")
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid schedule ID")
 		return
 	}
 
 	var req UpdateBackupScheduleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid request body: %v", err)
+		utils.Error(c, utils.ErrCodeValidationFailed, "Invalid request body: %v", err)
 		return
 	}
 
@@ -574,7 +575,7 @@ func (h *BackupHandler) UpdateBackupSchedule(c *gin.Context) {
 		req.K8sDeploymentType,
 	)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to update backup schedule: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to update backup schedule: %v", err)
 		return
 	}
 
@@ -586,7 +587,7 @@ func (h *BackupHandler) UpdateBackupSchedule(c *gin.Context) {
 func (h *BackupHandler) DeleteBackupSchedule(c *gin.Context) {
 	scheduleID := c.Param("scheduleId")
 
-	scheduleUUID, err := uuid.Parse(scheduleID)
+	scheduleUUID, err := utils.ParseUUID(scheduleID)
 	if err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid schedule ID")
 		return

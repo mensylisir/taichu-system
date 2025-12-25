@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MachineService 机器服务
@@ -23,21 +25,25 @@ func NewMachineService(machineRepo *repository.MachineRepository) *MachineServic
 
 // CreateMachine 创建机器
 func (s *MachineService) CreateMachine(machine *model.Machine) error {
-	// 验证IP是否已存在
-	existing, err := s.machineRepo.GetByID(machine.ID)
-	if err == nil && existing != nil {
-		return errors.New("machine with this ID already exists")
-	}
-
-	// 检查IP是否已存在
-	machines, _, _ := s.machineRepo.List(1, 100, "", "")
-	for _, m := range machines {
-		if m.IPAddress == machine.IPAddress {
-			return errors.New("machine with this IP already exists")
+	err := s.machineRepo.GetDB().Transaction(func(tx *gorm.DB) error {
+		var existing model.Machine
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", machine.ID).First(&existing).Error; err == nil {
+			return errors.New("machine with this ID already exists")
+		} else if err != gorm.ErrRecordNotFound {
+			return err
 		}
-	}
 
-	return s.machineRepo.Create(machine)
+		var existingIP model.Machine
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("ip_address = ?", machine.IPAddress).First(&existingIP).Error; err == nil {
+			return errors.New("machine with this IP already exists")
+		} else if err != gorm.ErrRecordNotFound {
+			return err
+		}
+
+		return tx.Create(machine).Error
+	})
+
+	return err
 }
 
 // GetMachine 获取机器

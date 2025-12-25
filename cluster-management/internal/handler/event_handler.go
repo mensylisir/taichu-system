@@ -15,20 +15,20 @@ type EventHandler struct {
 }
 
 type EventSummary struct {
-	ID          uuid.UUID `json:"id"`
-	EventType   string    `json:"event_type"`
-	Message     string    `json:"message"`
-	Severity    string    `json:"severity"`
-	Component   string    `json:"component"`
-	Count       int       `json:"count"`
-	FirstSeen   string    `json:"first_seen"`
-	LastSeen    string    `json:"last_seen"`
-	CreatedAt   string    `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
+	EventType string    `json:"event_type"`
+	Message   string    `json:"message"`
+	Severity  string    `json:"severity"`
+	Component string    `json:"component"`
+	Count     int       `json:"count"`
+	FirstSeen string    `json:"first_seen"`
+	LastSeen  string    `json:"last_seen"`
+	CreatedAt string    `json:"created_at"`
 }
 
 type EventListResponse struct {
-	Events  []EventSummary               `json:"events"`
-	Total   int64                        `json:"total"`
+	Events  []EventSummary            `json:"events"`
+	Total   int64                     `json:"total"`
 	Summary service.EventSummaryStats `json:"summary"`
 }
 
@@ -41,16 +41,9 @@ func NewEventHandler(eventService *service.EventService) *EventHandler {
 func (h *EventHandler) ListEvents(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
-	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
-		return
-	}
-
 	severity := c.Query("severity")
 	since := c.Query("since")
 
-	// 解析since时间
 	var sinceTime *time.Time
 	if since != "" {
 		if t, err := time.Parse(time.RFC3339, since); err == nil {
@@ -58,9 +51,9 @@ func (h *EventHandler) ListEvents(c *gin.Context) {
 		}
 	}
 
-	events, total, summary, err := h.eventService.ListEvents(id.String(), severity, sinceTime)
+	events, total, summary, err := h.eventService.ListEvents(clusterID, severity, sinceTime)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "Failed to list events: %v", err)
+		utils.Error(c, utils.ErrCodeInternalError, "Failed to list events: %v", err)
 		return
 	}
 

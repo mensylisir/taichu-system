@@ -1,10 +1,7 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/taichu-system/cluster-management/internal/service"
 	"github.com/taichu-system/cluster-management/pkg/utils"
 )
@@ -42,15 +39,15 @@ func NewAutoscalingPolicyHandler(autoscalingPolicyService *service.AutoscalingPo
 func (h *AutoscalingPolicyHandler) GetAutoscalingPolicy(c *gin.Context) {
 	clusterID := c.Param("id")
 
-	id, err := uuid.Parse(clusterID)
+	id, err := utils.ParseUUID(clusterID)
 	if err != nil {
-		utils.Error(c, http.StatusBadRequest, "Invalid cluster ID")
+		utils.Error(c, utils.ErrCodeInvalidInput, "Invalid cluster ID")
 		return
 	}
 
 	policy, err := h.autoscalingPolicyService.GetAutoscalingPolicy(id.String())
 	if err != nil {
-		utils.Error(c, http.StatusNotFound, "Autoscaling policy not found")
+		utils.Error(c, utils.ErrCodeNotFound, "Autoscaling policy not found")
 		return
 	}
 
@@ -77,5 +74,5 @@ func (h *AutoscalingPolicyHandler) GetAutoscalingPolicy(c *gin.Context) {
 		HPAPolicies:              hpaPolicies,
 	}
 
-	utils.Success(c, http.StatusOK, response)
+	utils.Success(c, 200, response)
 }

@@ -24,6 +24,10 @@ func NewClusterRepository(db *gorm.DB) *ClusterRepository {
 	return &ClusterRepository{db: db}
 }
 
+func (r *ClusterRepository) GetDB() *gorm.DB {
+	return r.db
+}
+
 func (r *ClusterRepository) Create(cluster *model.Cluster) error {
 	return r.db.Create(cluster).Error
 }
@@ -51,11 +55,42 @@ func (r *ClusterRepository) Update(cluster *model.Cluster) error {
 }
 
 func (r *ClusterRepository) Delete(id string) error {
-	cluster, err := r.GetByID(id)
-	if err != nil {
-		return err
-	}
-	return r.db.Unscoped().Delete(cluster).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		cluster, err := r.GetByID(id)
+		if err != nil {
+			return err
+		}
+
+		if err := tx.Exec("DELETE FROM cluster_states WHERE cluster_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Exec("DELETE FROM cluster_resources WHERE cluster_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Exec("DELETE FROM applications WHERE environment_id IN (SELECT id FROM environments WHERE cluster_id = ?)", id).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Exec("DELETE FROM application_resource_specs WHERE application_id IN (SELECT id FROM applications WHERE environment_id IN (SELECT id FROM environments WHERE cluster_id = ?))", id).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Exec("DELETE FROM resource_quotas WHERE environment_id IN (SELECT id FROM environments WHERE cluster_id = ?)", id).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Exec("DELETE FROM environments WHERE cluster_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Unscoped().Delete(cluster).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 func (r *ClusterRepository) List(params ListClustersParams) ([]*model.ClusterWithState, int64, error) {
@@ -86,24 +121,37 @@ func (r *ClusterRepository) List(params ListClustersParams) ([]*model.ClusterWit
 		return nil, 0, err
 	}
 
-	// 批量获取 cluster_state 和节点数量
+	// 批量获取 cluster_state
+	clusterIDs := make([]string, 0, len(clusters))
+	for _, cluster := range clusters {
+		clusterIDs = append(clusterIDs, cluster.ID.String())
+	}
+
+	var states []model.ClusterState
+	err = r.db.Where("cluster_id IN ?", clusterIDs).Find(&states).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	stateMap := make(map[string]*model.ClusterState)
+	for i := range states {
+		stateMap[states[i].ClusterID.String()] = &states[i]
+	}
+
 	result := make([]*model.ClusterWithState, 0, len(clusters))
 	for _, cluster := range clusters {
-		// 获取 cluster_state
-		var state model.ClusterState
-		err = r.db.Where("cluster_id = ?", cluster.ID).First(&state).Error
-		if err != nil && err != gorm.ErrRecordNotFound {
-			return nil, 0, err
+		state, exists := stateMap[cluster.ID.String()]
+		if !exists {
+			state = &model.ClusterState{KubernetesVersion: "pending-sync"}
 		}
 
-		// 如果没有 KubernetesVersion，记录需要同步
 		if state.KubernetesVersion == "" {
 			state.KubernetesVersion = "pending-sync"
 		}
 
 		result = append(result, &model.ClusterWithState{
 			Cluster: cluster,
-			State:   &state,
+			State:   state,
 		})
 	}
 

@@ -47,7 +47,6 @@ func (r *ClusterStateRepository) Upsert(state *model.ClusterState) error {
 				"last_sync_at":         state.LastSyncAt,
 				"sync_error":           state.SyncError,
 				"sync_success":         state.SyncSuccess,
-				"updated_at":           state.UpdatedAt,
 			}).Error
 	}
 	return r.db.Create(state).Error

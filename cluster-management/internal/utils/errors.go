@@ -36,6 +36,14 @@ const (
 	ErrCodeAlreadyExists    = 1003
 	ErrCodeInternalError    = 1004
 	ErrCodeValidationFailed = 1005
+	ErrCodeUnauthorized     = 1006
+	ErrCodeForbidden        = 1007
+	ErrCodeConflict         = 1008
+	ErrCodeBadRequest       = 1009
+	ErrCodeServiceUnavailable = 1010
+	ErrCodeTimeout          = 1011
+	ErrCodeQuotaExceeded    = 1012
+	ErrCodeInvalidState     = 1013
 )
 
 var (
@@ -44,4 +52,37 @@ var (
 	ErrAlreadyExists    = NewError(ErrCodeAlreadyExists, "resource already exists")
 	ErrInternalError    = NewError(ErrCodeInternalError, "internal server error")
 	ErrValidationFailed = NewError(ErrCodeValidationFailed, "validation failed")
+	ErrUnauthorized     = NewError(ErrCodeUnauthorized, "unauthorized")
+	ErrForbidden        = NewError(ErrCodeForbidden, "forbidden")
+	ErrConflict         = NewError(ErrCodeConflict, "conflict")
+	ErrBadRequest       = NewError(ErrCodeBadRequest, "bad request")
+	ErrServiceUnavailable = NewError(ErrCodeServiceUnavailable, "service unavailable")
+	ErrTimeout          = NewError(ErrCodeTimeout, "operation timeout")
+	ErrQuotaExceeded    = NewError(ErrCodeQuotaExceeded, "quota exceeded")
+	ErrInvalidState     = NewError(ErrCodeInvalidState, "invalid state")
 )
+
+func GetHTTPStatusCode(errCode int) int {
+	switch errCode {
+	case ErrCodeInvalidInput, ErrCodeValidationFailed, ErrCodeBadRequest:
+		return 400
+	case ErrCodeUnauthorized:
+		return 401
+	case ErrCodeForbidden:
+		return 403
+	case ErrCodeNotFound:
+		return 404
+	case ErrCodeConflict, ErrCodeAlreadyExists:
+		return 409
+	case ErrCodeQuotaExceeded:
+		return 429
+	case ErrCodeServiceUnavailable:
+		return 503
+	case ErrCodeTimeout:
+		return 504
+	case ErrCodeInternalError:
+		return 500
+	default:
+		return 500
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/taichu-system/cluster-management/internal/model"
 	"github.com/taichu-system/cluster-management/internal/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -21,6 +22,7 @@ type ClusterService struct {
 	clusterResourceRepo *repository.ClusterResourceRepository
 	encryptionService   *EncryptionService
 	clusterManager      *ClusterManager
+	auditService        *AuditService
 }
 
 func NewClusterService(
@@ -29,6 +31,7 @@ func NewClusterService(
 	clusterResourceRepo *repository.ClusterResourceRepository,
 	encryptionService *EncryptionService,
 	clusterManager *ClusterManager,
+	auditService *AuditService,
 ) *ClusterService {
 	return &ClusterService{
 		clusterRepo:         clusterRepo,
@@ -36,6 +39,7 @@ func NewClusterService(
 		clusterResourceRepo: clusterResourceRepo,
 		encryptionService:   encryptionService,
 		clusterManager:      clusterManager,
+		auditService:        auditService,
 	}
 }
 
@@ -44,22 +48,36 @@ func (s *ClusterService) ValidateKubeconfig(kubeconfig string) (bool, error) {
 }
 
 func (s *ClusterService) Create(cluster *model.Cluster) (*model.Cluster, error) {
-	exists, err := s.clusterRepo.ExistsByName(cluster.Name)
+	var createdCluster *model.Cluster
+
+	err := s.clusterRepo.GetDB().Transaction(func(tx *gorm.DB) error {
+		var existing model.Cluster
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("name = ?", cluster.Name).First(&existing).Error; err == nil {
+			return ErrClusterExists
+		} else if err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("failed to check cluster existence: %w", err)
+		}
+
+		cluster.CreatedBy = "api-user"
+		cluster.UpdatedBy = "api-user"
+
+		if err := tx.Create(cluster).Error; err != nil {
+			return fmt.Errorf("failed to create cluster: %w", err)
+		}
+
+		createdCluster = cluster
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to check cluster existence: %w", err)
-	}
-	if exists {
-		return nil, ErrClusterExists
+		return nil, err
 	}
 
-	cluster.CreatedBy = "api-user"
-	cluster.UpdatedBy = "api-user"
-
-	if err := s.clusterRepo.Create(cluster); err != nil {
-		return nil, fmt.Errorf("failed to create cluster: %w", err)
+	if s.auditService != nil {
+		s.auditService.LogCreate("cluster", createdCluster.ID.String(), "api-user", "", "", createdCluster)
 	}
 
-	return cluster, nil
+	return createdCluster, nil
 }
 
 func (s *ClusterService) GetByID(id string) (*model.Cluster, error) {
@@ -120,12 +138,43 @@ func (s *ClusterService) ListClusters(params ListClustersParams) ([]*model.Clust
 }
 
 func (s *ClusterService) Update(cluster *model.Cluster) error {
+	oldCluster, err := s.clusterRepo.GetByID(cluster.ID.String())
+	if err != nil {
+		return err
+	}
+
+	oldValue := *oldCluster
+
 	cluster.UpdatedBy = "api-user"
-	return s.clusterRepo.Update(cluster)
+	err = s.clusterRepo.Update(cluster)
+	if err != nil {
+		return err
+	}
+
+	if s.auditService != nil {
+		s.auditService.LogUpdate("cluster", cluster.ID.String(), "api-user", "", "", oldValue, cluster)
+	}
+
+	return nil
 }
 
 func (s *ClusterService) Delete(id string) error {
-	return s.clusterRepo.Delete(id)
+	cluster, err := s.clusterRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+
+	oldValue := *cluster
+
+	if err := s.clusterRepo.Delete(id); err != nil {
+		return err
+	}
+
+	if s.auditService != nil {
+		s.auditService.LogDelete("cluster", cluster.ID.String(), "api-user", "", "", oldValue)
+	}
+
+	return nil
 }
 
 func (s *ClusterService) TriggerSync(clusterID string) error {

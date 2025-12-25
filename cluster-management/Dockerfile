@@ -1,7 +1,7 @@
 # 多阶段构建 Dockerfile for 太初集群管理系统
 
 # 第一阶段：构建阶段
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
